@@ -73,12 +73,14 @@ def model():
     return names[0] if names else None
 
 
-def _ask(system, prompt, seed, temperature=0.8):
+def _ask(system, prompt, seed, temperature=0.8, keep_alive=None):
     m = model()
     if not m:
         raise WriterError("Pour écrire, installe Ollama (ollama.com) puis un modèle : « ollama pull mistral-nemo ».")
     body = {"model": m, "system": system, "prompt": prompt, "format": "json", "stream": False, "think": False,
             "options": {"temperature": temperature, "seed": int(seed), "num_predict": 600}}
+    if keep_alive is not None:  # 0 : le modèle de texte rend la carte tout de suite au dessin
+        body["keep_alive"] = keep_alive
     req = urllib.request.Request(OLLAMA + "/api/generate", data=json.dumps(body).encode(), headers={"Content-Type": "application/json"})
     try:
         with urllib.request.urlopen(req, timeout=300) as r:
@@ -110,6 +112,41 @@ def idea(theme="melange", seed=None):
     return dict(name=name, description=desc, theme=theme)
 
 
+POSTURES = ("quatre_pattes", "deux_jambes", "plusieurs_pattes", "flotte", "vole", "rampe", "nage")
+SYS_BRIEF = (
+    "Tu aides un générateur d'images à comprendre une créature décrite en français. Tu lis la description avec soin, "
+    "sans rien inventer ni oublier, et tu réponds uniquement en JSON.")
+
+
+def brief(description, seed=1):
+    """Ce que la description veut dire pour le dessin : posture, nombre de pattes, description anglaise précise.
+
+    Le modèle d'image comprend mieux l'anglais et, surtout, les vues de dos et de profil en ont besoin : sans elle il
+    ne voit que l'image de face et invente des pattes à une créature qui flotte."""
+    prompt = (f"Description : « {description} »\n\nRéponds en JSON avec exactement ces clés :\n"
+              f"\"posture\" (un seul mot parmi : {', '.join(POSTURES)} ; « flotte » si elle lévite ou flotte dans les airs "
+              "sans toucher le sol, « rampe » pour un serpent, un ver ou une limace, « nage » pour un poisson),\n"
+              "\"pattes\" (le nombre de pattes ou de jambes qui touchent le sol, 0 si elle n'en a pas ; les tentacules, "
+              "bras et ailes ne comptent pas),\n"
+              "\"en\" (la description traduite en anglais, précise et visuelle : forme du corps, posture, nombres exacts "
+              "de chaque partie, couleurs ; 1 à 3 phrases ; rien d'ajouté),\n"
+              "\"profil\" (en anglais, une phrase : à quoi ressemble sa silhouette vue de son côté gauche, "
+              "y compris ce qu'il y a sous son corps).")
+    out = _ask(SYS_BRIEF, prompt, seed, temperature=0.2, keep_alive=0)
+    posture = _clean(out.get("posture"), 30).lower().replace(" ", "_")
+    posture = posture if posture in POSTURES else next((p for p in POSTURES if p.split("_")[0] in posture), "")
+    try:
+        legs = max(0, min(int(out.get("pattes", 0)), 100))
+    except (TypeError, ValueError):
+        legs = 0
+    en = _clean(out.get("en"), 600)
+    if not posture or not en:
+        raise WriterError("La plume n'a pas compris la description.")
+    if posture in ("flotte", "rampe", "nage"):
+        legs = 0
+    return dict(posture=posture, pattes=legs, en=en, profil=_clean(out.get("profil"), 300))
+
+
 def lore(name, description, seed=1):
     """Fiche façon Pokédex : type, espèce, taille, poids, habitat, description, histoire."""
     prompt = (f"Créature : « {name} » — {description}\n\nRédige sa fiche en JSON avec exactement ces clés :\n"
@@ -130,6 +167,10 @@ def lore(name, description, seed=1):
 
 if __name__ == "__main__":  # auto-test (Ollama requis) : python nb_writer.py
     print("modèle :", model())
+    for d in ("une sphère de chair violette qui flotte dans les airs avec un seul œil géant", "une vache avec une corne centrale"):
+        b = brief(d)
+        print(b)
+        assert b["posture"] in POSTURES and b["en"], b
     i = idea("lovecraft", 4)
     print(i)
     f = lore(i["name"] or "Créature", i["description"])

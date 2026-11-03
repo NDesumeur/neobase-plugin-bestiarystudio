@@ -163,9 +163,20 @@
 /* inspiration et fiche */
 .nbs-themes { gap: 6px; flex-wrap: wrap; }
 .nbs-btn.sm { padding: 2px 10px; font-size: 19px; }
-.nbs-fiche { color: var(--ink0); max-width: 760px; }
-.nbs-fiche p { margin: 6px 0 0; line-height: 1.35; }
-.nbs-fiche-head { display: flex; align-items: center; gap: 10px; font-size: 22px; }
-.nbs-fiche-sub { color: var(--parch3); }
-.nbs-type { background: var(--violet); color: var(--white); padding: 0 8px; text-transform: capitalize; box-shadow: 2px 2px 0 var(--ink0); font-size: 16px; }
-.nbs-story { font-style: italic; }
+.nbs-fiche { color: var(--ink0); max-width: 760px; padding: 4px 10px 8px; user-select: text; }
+.nbs .nbs-fiche, .nbs .nbs-fiche * { text-shadow: none; }  /* l'ombre des titres, héritée, bavait sur le texte sombre */
+.nbs-fiche .nbs-type { text-shadow: 1px 1px 0 var(--ink0); }
+.nbs-fiche-top { display: flex; gap: 14px; align-items: flex-start; }
+.nbs-fiche-pic { flex: none; width: 136px; height: 136px; padding: 4px; }
+.nbs-fiche-pic img { width: 128px; height: 128px; display: block; }
+.nbs-fiche-head { display: flex; align-items: center; gap: 10px; font-size: 30px; line-height: 32px; margin-bottom: 6px; }
+.nbs-type { background: var(--violet); color: var(--white); padding: 2px 10px; text-transform: capitalize; box-shadow: 2px 2px 0 var(--ink0); font-size: 20px; }
+/* le texte suivi est en police de livre : la police pixel est faite pour les titres, pas pour des phrases */
+.nbs-fiche-stats, .nbs-read { font: 17px/1.55 Georgia, "Palatino Linotype", "Book Antiqua", serif; -webkit-font-smoothing: antialiased; }
+.nbs-fiche-stats { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; margin: 0; }
+.nbs-fiche-stats dt { color: var(--brass3); font-weight: bold; }
+.nbs-fiche-stats dd { margin: 0; }
+.nbs-read { margin: 12px 0 0; }
+.nbs-story { margin-top: 12px; padding: 4px 12px 10px; background: rgba(122, 78, 28, .12); box-shadow: inset 4px 0 0 var(--brass2); }
+.nbs-story-t { color: var(--brass3); font-size: 22px; margin-top: 4px; }
+.nbs-story .nbs-read { margin-top: 4px; font-style: italic; }

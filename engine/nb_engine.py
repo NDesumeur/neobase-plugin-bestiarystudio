@@ -34,14 +34,13 @@ FACING = {
              "perfectly symmetrical, its body aligned on the vertical axis, not turned to either side. We see its back "
              "and the back of its head; no face and no eyes are visible."),
     "gauche": ("Turn this exact same creature a full 90 degrees so it faces exactly toward the left edge of the screen: "
-               "a pure side profile, in exactly the same posture as in the reference image (a four-legged creature stays on "
-               "all fours, an upright one stays upright), its face pointing left, "
+               "a pure side profile, in exactly the same posture as in the reference image{posture}, its face pointing left, "
                "nothing of it turned toward the viewer."),
 }
 KEEP = (" Keep the identical design, colors, proportions and pixel art style, and the same top-down camera. "
-        "Keep exactly the same body parts and the same number of legs, eyes, horns and tentacles: add nothing, "
-        "remove nothing (a creature without legs gets no legs). "
+        "Keep exactly the same body parts and the same number of {parts}: add nothing, remove nothing. "
         "Plain flat light gray background, no cast shadow.")
+GUESSED_POSTURE = " (a four-legged creature stays on all fours, an upright one stays upright)"
 
 
 # parties qu'on compte : le modèle retombe sur l'anatomie habituelle (une vache a 2 cornes) si on n'insiste pas
@@ -81,8 +80,41 @@ def count_line(description):
             "as described, not the usual anatomy.")
 
 
-def design_prompt(description):
-    return f"{description.strip()}{count_line(description)}\n\n{STYLE} {FACING['bas']}"
+# posture comprise (nb_writer.brief, ou devinée) : dite en clair, surtout au profil, où le modèle ne voit que la face
+POSE = {
+    "quatre_pattes": "It stands on all four legs.",
+    "deux_jambes": "It stands upright on its two legs.",
+    "plusieurs_pattes": "It stands on its {n} legs.",
+    "flotte": ("It floats in mid-air, well above the ground, with empty space beneath its smooth rounded underside; "
+               "it hovers, it does not stand."),
+    "vole": "It hovers in mid-air on its wings, above the ground.",
+    "rampe": "Its long body lies flat on the ground and slithers along it, belly on the ground.",
+    "nage": "It swims, floating in the water with its fins, its body ending in a tail.",
+}
+FLOATING = {"flotte", "vole", "nage"}
+_GUESS = (("flotte", r"flott|levit|dans les airs|en l.air|plane\b|suspendu"), ("vole", r"\bvol(e|ant)\b"),
+          ("rampe", r"rampe|serpent|\bver\b|limace|anguille"), ("nage", r"\bnage|poisson"))
+
+
+def guess_brief(description):
+    """Sans plume (pas d'Ollama) : la posture devinée par mots-clés, la description reste en français."""
+    folded = nb_core.fold(description)
+    posture = next((p for p, rx in _GUESS if nb_core.re.search(rx, folded)), "")
+    legs = 0 if posture or not has_legs(description) else counts(description).get("legs", 0)  # 0 : on ne sait pas
+    if legs and not posture:
+        posture = {2: "deux_jambes", 4: "quatre_pattes"}.get(legs, "plusieurs_pattes")
+    return dict(posture=posture, pattes=legs, en="", profil="")
+
+
+def pose_line(brief):
+    p = (brief or {}).get("posture")
+    return " " + POSE[p].format(n=brief.get("pattes") or "many") if p in POSE else ""
+
+
+def design_prompt(description, brief=None):
+    en = (brief or {}).get("en")
+    text = description.strip() + (f"\n(In English: {en})" if en else "")
+    return f"{text}{count_line(description)}{pose_line(brief)}\n\n{STYLE} {FACING['bas']}"
 
 
 # profil d'une créature à pattes : sans ça le corps se tasse (vache trapue, pattes cachées)
@@ -91,8 +123,16 @@ PROPORTIONS = (" Same proportions as the front view: same head size, same leg le
                "feet on the ground.")
 
 
-def view_prompt(direction, legs=False):
-    return FACING[direction] + (PROPORTIONS if legs and direction == "gauche" else "") + KEEP
+def view_prompt(direction, legs=False, brief=None, description=""):
+    b = brief or {}
+    what = b.get("en") or description.strip()
+    head = f"The creature: {what}{count_line(description)}{pose_line(b)} " if what else ""
+    side = f" Seen from the side: {b['profil']}" if direction == "gauche" and b.get("profil") else ""
+    known = b.get("posture") in POSE
+    facing = FACING[direction].replace("{posture}", "" if known else GUESSED_POSTURE)
+    walks = legs or not known  # posture inconnue : on garde les pattes dans la liste, comme avant
+    keep = KEEP.format(parts=("legs, " if walks else "") + "eyes, horns, tentacles and wings")
+    return head + facing + side + (PROPORTIONS if legs and direction == "gauche" else "") + keep
 
 
 def _loaders(g, model):
@@ -209,8 +249,10 @@ def score_view(im, ref, direction):
     return base + 6.0 * similarity(im, ref)
 
 
-def has_legs(description):
+def has_legs(description, brief=None):
     """La marche par édition de pose n'a de sens qu'avec des pattes ; sinon (œil, blob, serpent) : rebond."""
+    if brief and brief.get("posture"):
+        return brief["posture"] not in FLOATING | {"rampe"} and brief.get("pattes", 0) > 0
     spec = nb_core.analyze("", description)
     if spec.only or "legs" in spec.forbidden or "body" in spec.forbidden:
         return False
@@ -231,6 +273,14 @@ def bob(im, phase):
     return out
 
 
+def hover(im, phase):
+    """Une créature qui flotte ne se tasse pas : elle monte et descend doucement."""
+    out = Image.new("RGBA", im.size, (0, 0, 0, 0))
+    box = im.getbbox() or (0, 0, *im.size)
+    out.alpha_composite(im, (0, -phase * max(1, round((box[3] - box[1]) * .03))))
+    return out
+
+
 def _best(client, prompt, refs, direction, seed, tries, cancel, progress, label):
     """refs[0] = le design (sert aussi à noter les couleurs)."""
     ref = refs[0]
@@ -245,30 +295,32 @@ def _best(client, prompt, refs, direction, seed, tries, cancel, progress, label)
     return [im for _, im in cands]
 
 
-def generate_design(client, description, seed, progress=lambda m: None, cancel=lambda: False):
+def generate_design(client, description, seed, progress=lambda m: None, cancel=lambda: False, brief=None):
     progress("Esquisse du design")
-    return render(client, MODEL, design_prompt(description), seed, cancel=cancel, cut=True)
+    return render(client, MODEL, design_prompt(description, brief), seed, cancel=cancel, cut=True)
 
 
-def generate_directions(client, design, seed, progress=lambda m: None, cancel=lambda: False, tries=TRIES, legs=False):
+def generate_directions(client, design, seed, progress=lambda m: None, cancel=lambda: False, tries=TRIES, legs=False,
+                        brief=None, description=""):
     """{direction: [versions, la meilleure d'abord]} ; droite = miroir de gauche (même créature, garanti)."""
     out = {"bas": [design]}
-    out["haut"] = _best(client, view_prompt("haut"), [design], "haut", seed + 7, tries, cancel, progress, "Vue de dos")
+    out["haut"] = _best(client, view_prompt("haut", False, brief, description), [design], "haut", seed + 7, tries, cancel, progress, "Vue de dos")
     # à pattes : le design seul (le dos en référence laisse sa raie sur le flanc et tasse le corps) ;
     # sans pattes (œil, pieuvre) : face + dos, sinon le modèle invente un corps à quatre pattes en tournant de 90°
     refs = [design] if legs else [design, out["haut"][0]]
-    out["gauche"] = _best(client, view_prompt("gauche", legs), refs, "gauche", seed + 7, tries, cancel,
+    out["gauche"] = _best(client, view_prompt("gauche", legs, brief, description), refs, "gauche", seed + 7, tries, cancel,
                           progress, "Profil")
     out["droite"] = [ImageOps.mirror(im) for im in out["gauche"]]
     return out
 
 
-def generate_view(client, refs, direction, seed, progress=lambda m: None, cancel=lambda: False, legs=False):
+def generate_view(client, refs, direction, seed, progress=lambda m: None, cancel=lambda: False, legs=False,
+                  brief=None, description=""):
     """Une nouvelle version d'une vue (« Refaire ») : refs = [design] ou [design, dos] pour le profil."""
     label = {"haut": "Vue de dos", "gauche": "Profil"}[direction]
     if legs:
         refs = refs[:1]
-    return _best(client, view_prompt(direction, legs), refs, direction, seed, 1, cancel, progress, label)[0]
+    return _best(client, view_prompt(direction, legs, brief, description), refs, direction, seed, 1, cancel, progress, label)[0]
 
 
 def leg_zone(im):
@@ -341,13 +393,14 @@ def step_frame(im, direction, phase):
     return out
 
 
-def generate_walk(client, view, direction, description, seed, progress=lambda m: None, cancel=lambda: False):
+def generate_walk(client, view, direction, description, seed, progress=lambda m: None, cancel=lambda: False, brief=None):
     """3 images : pas A, repos, pas B (lecture A, repos, B, repos). droite : miroir de la marche gauche.
 
     Les pas sont calculés depuis la pose de repos (pas redessinés par le modèle) : les pattes restent nettes et la
     créature identique d'une image à l'autre. Sans pattes (œil, blob, serpent) : rebond."""
-    if not has_legs(description):
-        return [bob(view, 1), view.copy(), bob(view, -1)]
+    if not has_legs(description, brief):
+        move = hover if (brief or {}).get("posture") in FLOATING else bob
+        return [move(view, 1), view.copy(), move(view, -1)]
     return [step_frame(view, direction, 1), view.copy(), step_frame(view, direction, -1)]
 
 

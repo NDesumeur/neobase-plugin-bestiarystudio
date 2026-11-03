@@ -65,6 +65,7 @@ const HTML = `<link rel="stylesheet" href="${U}ui/studio.css">
             <div class="nbs-sep"></div>
             <div class="nbs-title">Choisis ton design</div>
             <div class="nbs-row nbs-sketches" id="sketchRow"></div>
+            <div class="nbs-hint" id="understood"></div>
             <div class="nbs-hint">Aucune ne va ? Change la graine ou ta description et invoque à nouveau.</div>
           </div>
         </div>
@@ -273,9 +274,13 @@ export default async function (ctx) {
   function renderFiche() {
     const f = S.cr?.lore, box = $('#fiche');
     if (!S.cr) { box.innerHTML = '<div class="nbs-hint">Aucune créature ouverte.</div>'; return; }
-    box.innerHTML = f ? `<div class="nbs-fiche-head"><b>${esc(S.cr.name)}</b><span class="nbs-type">${esc(f.type)}</span></div>
-      <div class="nbs-fiche-sub">${esc(f.espece)} · ${esc(f.taille)} · ${esc(f.poids)}</div>
-      <p><i>Habitat.</i> ${esc(f.habitat)}</p><p>${esc(f.description)}</p><p class="nbs-story">${esc(f.histoire)}</p>`
+    const pic = sprite('bas', 'repos');
+    box.innerHTML = f ? `<div class="nbs-fiche-top">${pic ? `<div class="nbs-fiche-pic nbs-well"><img src="${pic}" alt=""></div>` : ''}
+      <div><div class="nbs-fiche-head"><b>${esc(S.cr.name)}</b><span class="nbs-type">${esc(f.type)}</span></div>
+      <dl class="nbs-fiche-stats"><dt>Espèce</dt><dd>${esc(f.espece)}</dd><dt>Taille</dt><dd>${esc(f.taille)}</dd>
+      <dt>Poids</dt><dd>${esc(f.poids)}</dd><dt>Habitat</dt><dd>${esc(f.habitat)}</dd></dl></div></div>
+      <p class="nbs-read">${esc(f.description)}</p>
+      <div class="nbs-story"><div class="nbs-story-t">Légende</div><p class="nbs-read">${esc(f.histoire)}</p></div>`
       : '<div class="nbs-hint">Pas encore de fiche : clique « Réécrire la fiche ».</div>';
   }
   $('#relore').onclick = async () => {
@@ -299,6 +304,9 @@ export default async function (ctx) {
     const box = $('#sketches'), pending = !!S.cr?.pending;
     box.hidden = !pending;
     if (!pending) return;
+    const b = S.cr.brief, P = { quatre_pattes: 'à quatre pattes', deux_jambes: 'debout sur deux jambes', plusieurs_pattes: `sur ${b?.pattes} pattes`,
+      flotte: 'flotte dans les airs, sans pattes', vole: 'vole', rampe: 'rampe, sans pattes', nage: 'nage, sans pattes' };
+    $('#understood').textContent = b?.posture ? `Compris : ${P[b.posture] || b.posture}. Le dos et le profil suivront cette posture.` : '';
     $('#sketchRow').innerHTML = S.cr.designs.map((f, i) => `<button class="nbs-sketch" data-i="${i}" title="Continuer avec celle-ci">
       <img src="${src(f)}" alt=""><span class="nbs-btn go">${ic('ok')}Celle-ci</span></button>`).join('');
     $$('#sketchRow .nbs-sketch').forEach(b => b.onclick = () => {

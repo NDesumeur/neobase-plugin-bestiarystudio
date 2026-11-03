@@ -6,7 +6,14 @@ TRIES = 2
 COLORS = {"bas": (200, 60, 60), "haut": (60, 60, 200), "gauche": (60, 180, 60)}
 
 
-def has_legs(description):
+def guess_brief(description):
+    return dict(posture="flotte" if "flotte" in description else "quatre_pattes", pattes=0 if "flotte" in description else 4,
+                en="", profil="")
+
+
+def has_legs(description, brief=None):
+    if brief:
+        return brief.get("pattes", 0) > 0
     return "sans pattes" not in description and "juste" not in description
 
 
@@ -19,17 +26,19 @@ def _blob(color, seed, lift=0, size=256):
     return im
 
 
-def generate_design(client, description, seed, progress=lambda m: None, cancel=lambda: False):
+def generate_design(client, description, seed, progress=lambda m: None, cancel=lambda: False, brief=None):
     progress("Esquisse du design")
     return _blob(COLORS["bas"], seed)
 
 
-def generate_view(client, refs, direction, seed, progress=lambda m: None, cancel=lambda: False, legs=False):
+def generate_view(client, refs, direction, seed, progress=lambda m: None, cancel=lambda: False, legs=False,
+                  brief=None, description=""):
     progress(direction)
     return _blob(COLORS[direction], seed)
 
 
-def generate_directions(client, design, seed, progress=lambda m: None, cancel=lambda: False, tries=TRIES, legs=False):
+def generate_directions(client, design, seed, progress=lambda m: None, cancel=lambda: False, tries=TRIES, legs=False,
+                        brief=None, description=""):
     out = {"bas": [design]}
     for d in ("haut", "gauche"):
         out[d] = []
@@ -40,8 +49,8 @@ def generate_directions(client, design, seed, progress=lambda m: None, cancel=la
     return out
 
 
-def generate_walk(client, view, direction, description, seed, progress=lambda m: None, cancel=lambda: False):
-    if has_legs(description):
+def generate_walk(client, view, direction, description, seed, progress=lambda m: None, cancel=lambda: False, brief=None):
+    if has_legs(description, brief):
         progress(f"Marche {direction} : pas 1")
         progress(f"Marche {direction} : pas 2")
     up = Image.new("RGBA", view.size, (0, 0, 0, 0))
@@ -56,6 +65,10 @@ def model():
 
 def idea(theme="melange", seed=None):
     return dict(name="Crapaud test", description="un crapaud violet à quatre pattes avec trois yeux rouges", theme=theme)
+
+
+def brief(description, seed=1):
+    return dict(posture="quatre_pattes", pattes=4, en="a test creature", profil="a round body")
 
 
 def lore(name, description, seed=1):

@@ -62,6 +62,7 @@ def main():
         assert j["kind"] == "sketch"
         _, c = call(port, "/creature?slug=" + slug)
         assert c["pending"] and len(c["designs"]) == 3, c
+        assert c["brief"]["posture"] and c["brief"]["en"], c["brief"]  # la description est lue avant les esquisses
         assert call(port, "/library")[1][0]["thumb"], "pas de vignette pour une esquisse"
         assert call(port, "/continue", {"slug": slug, "index": 1})[0] == 200
         wait_job(port)

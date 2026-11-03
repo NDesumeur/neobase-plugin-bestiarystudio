@@ -164,19 +164,40 @@ class Studio:
         slug = rec["slug"]
 
         def run(progress, cancel):  # 1re étape : des esquisses du design, l'utilisateur choisit la bonne (/continue)
+            progress("Lecture de la description")
+            brief = self._brief(slug)
             c = self.client()
             for i in range(SKETCHES):
-                design = self.eng.generate_design(c, description, seed + i, progress, cancel)
+                design = self.eng.generate_design(c, description, seed + i, progress, cancel, brief=brief)
                 self.lib.add_pil(slug, "bas", design, f"esquisse {i + 1}")
             self.lib.set_active(slug, "bas", 0)
             return slug
-        return self.jobs.start("sketch", run, SKETCHES, slug), slug
+        return self.jobs.start("sketch", run, SKETCHES + 1, slug), slug
+
+    def _brief(self, slug):
+        """Ce que la plume a compris de la description (posture, pattes, anglais), calculé une fois par créature."""
+        rec = self.lib.load(slug)
+        if rec.get("brief", {}).get("posture") is not None and rec["brief"].get("description") == rec["description"]:
+            return rec["brief"]
+        try:
+            self._free_gpu()
+            brief = self.writer.brief(rec["description"], int(rec.get("seed", 1)))
+        except Exception as exc:  # pas d'Ollama : posture devinée par mots-clés
+            print("description non analysée :", exc)
+            brief = self.eng.guess_brief(rec["description"])
+        brief["description"] = rec["description"]
+        rec = self.lib.load(slug)
+        rec["brief"] = brief
+        self.lib.save(rec)
+        return brief
 
     def _rest(self, c, slug, seed, progress, cancel):
         """Dos, profils et marche à partir du design actif (tout est refait : les 4 directions restent cohérentes)."""
         rec = self.lib.load(slug)
         design = self._active(slug, "bas")
-        dirs = self.eng.generate_directions(c, design, seed, progress, cancel, legs=self.eng.has_legs(rec["description"]))
+        brief = self._brief(slug)
+        dirs = self.eng.generate_directions(c, design, seed, progress, cancel, legs=self.eng.has_legs(rec["description"], brief),
+                                            brief=brief, description=rec["description"])
         for d in ("haut", "gauche"):  # droite : le miroir de la gauche active, posé par _mirror_walk
             n = len(rec.get("views", {}).get(d, {}).get("files", []))
             for im in dirs[d]:
@@ -242,7 +263,8 @@ class Studio:
 
     def _walk(self, c, slug, d, progress, cancel):
         rec = self.lib.load(slug)
-        frames = self.eng.generate_walk(c, self._active(slug, d), d, rec["description"], rec["seed"], progress, cancel)
+        frames = self.eng.generate_walk(c, self._active(slug, d), d, rec["description"], rec["seed"], progress, cancel,
+                                        brief=rec.get("brief"))
         self.lib.add_pil(slug, frame_key(d, "pas1"), frames[0], "marche")
         self.lib.add_pil(slug, frame_key(d, "pas2"), frames[2], "marche")
 
@@ -267,28 +289,30 @@ class Studio:
         rec = self.lib.load(slug)
         if rec is None or d not in DIRS:
             raise ValueError("Créature ou direction inconnue.")
-        legs = self.eng.has_legs(rec["description"])
 
         def run(progress, cancel):
+            brief = self._brief(slug)
+            legs = self.eng.has_legs(rec["description"], brief)
             c = self.client()
             seed = int(time.time()) % 1000000
             if d == "bas":  # nouveau design : tout le reste suit, sinon dos et profil montrent l'ancienne créature
-                im = self.eng.generate_design(c, rec["description"], seed, progress, cancel)
+                im = self.eng.generate_design(c, rec["description"], seed, progress, cancel, brief=brief)
                 self.lib.add_pil(slug, "bas", im, f"graine {seed}")
                 self.lib.set_active(slug, "bas", 10 ** 6)
                 return self._rest(c, slug, seed, progress, cancel)
             else:
                 src = "gauche" if d == "droite" else d
                 refs = [self._active(slug, "bas")] + ([self._active(slug, "haut")] if src == "gauche" else [])
-                im = self.eng.generate_view(c, refs, src, seed, progress, cancel, legs=legs)
+                im = self.eng.generate_view(c, refs, src, seed, progress, cancel, legs=legs, brief=brief,
+                                            description=rec["description"])
                 if d == "droite":
                     im = ImageOps.mirror(im)
             self.lib.add_pil(slug, d, im, f"graine {seed}")
             if d == "droite":
-                frames = self.eng.generate_walk(c, ImageOps.mirror(im), "gauche", rec["description"], seed, progress, cancel)
+                frames = self.eng.generate_walk(c, ImageOps.mirror(im), "gauche", rec["description"], seed, progress, cancel, brief=brief)
                 frames = [ImageOps.mirror(f) for f in frames]
             else:
-                frames = self.eng.generate_walk(c, im, d, rec["description"], seed, progress, cancel)
+                frames = self.eng.generate_walk(c, im, d, rec["description"], seed, progress, cancel, brief=brief)
             self.lib.add_pil(slug, frame_key(d, "pas1"), frames[0], "marche")
             self.lib.add_pil(slug, frame_key(d, "pas2"), frames[2], "marche")
             if d == "gauche":
@@ -326,7 +350,7 @@ class Studio:
                     lab=rec.get("lab", dict(LAB_DEFAULTS)), views=views, sprites=sprites,
                     palette=rec.get("sprite_palette", []), updated=rec.get("updated", 0),
                     sheet="sprites/sheet.png" if (sd / "sheet.png").is_file() else None,
-                    designs=rec.get("views", {}).get("bas", {}).get("files", []), lore=rec.get("lore"),
+                    designs=rec.get("views", {}).get("bas", {}).get("files", []), lore=rec.get("lore"), brief=rec.get("brief"),
                     pending=not rec.get("views", {}).get("haut"))  # esquisses pas encore choisies
 
     def library(self):
