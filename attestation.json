@@ -1,9 +1,9 @@
 {
   "pluginId": "neobase.bestiarystudio",
   "repo": "NDesumeur/neobase-plugin-bestiarystudio",
-  "version": "1.0.3",
-  "sha256": "844e339175933c441a22e9e8a73e582c5dbd9c8d6bab434909f98271bd6a0cb0",
-  "approvedAt": "2026-11-03T22:01:33.044Z",
+  "version": "1.0.4",
+  "sha256": "801a3b6ee825a689888f9e7baa49ffb589d0e4bf88a5a485418f2a2755791a0c",
+  "approvedAt": "2026-11-03T22:51:22.485Z",
   "neobase": ">=4.1.0",
-  "signature": "E/hx7kQKdiV6Rk3tYijIFuSRZF03WLUAKbrQxR4f6+LhimPbDRrxwIF3DTjhU8mPAAYIZ/RdLLvSN556wxz6BQ=="
+  "signature": "AYQwE1ojevxkuQ+u+PVtp84dsPCv6MfJXYnRlKXKsmI/VagjSFn549iiXKlTLhbpus3Dn/9+v2ZN9fz3TnShBw=="
 }
