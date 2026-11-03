@@ -58,9 +58,16 @@ def main():
         assert code == 200, r
         slug = r["slug"]
         assert call(port, "/create", {"name": "Autre", "description": "x"})[0] == 400, "deux tâches en même temps"
+        j = wait_job(port)
+        assert j["kind"] == "sketch"
+        _, c = call(port, "/creature?slug=" + slug)
+        assert c["pending"] and len(c["designs"]) == 3, c
+        assert call(port, "/library")[1][0]["thumb"], "pas de vignette pour une esquisse"
+        assert call(port, "/continue", {"slug": slug, "index": 1})[0] == 200
         wait_job(port)
 
         _, c = call(port, "/creature?slug=" + slug)
+        assert not c["pending"] and c["views"]["bas"]["version"] == 2, c["views"]["bas"]
         assert len(c["sprites"]) == 12, c["sprites"]
         assert c["views"]["haut"]["versions"] == 2 and c["views"]["droite"]["file"], c["views"]
         code, png = call(port, f"/file?slug={slug}&path=sprites/sheet.png", raw=True)
@@ -89,6 +96,11 @@ def main():
         wait_job(port)
         _, c = call(port, "/creature?slug=" + slug)
         assert c["views"]["gauche"]["versions"] == 3, c["views"]["gauche"]
+        haut = c["views"]["haut"]["versions"]
+        _, r = call(port, "/redo", {"slug": slug, "dir": "bas"})
+        wait_job(port)
+        _, c = call(port, "/creature?slug=" + slug)
+        assert c["views"]["bas"]["version"] == 4 and c["views"]["haut"]["versions"] == haut + 2, "refaire la face ne suit pas"
 
         _, e = call(port, "/export", {"slug": slug})
         meta = json.loads(Path(e["json"]).read_text(encoding="utf-8"))

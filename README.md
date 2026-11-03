@@ -6,7 +6,7 @@ Décris une créature en français, NeoBestiary Studio la dessine en **sprite pi
 
 ## Ce qu'il sait faire
 
-- **Créer** : tu écris ce que tu veux (« juste un œil géant », « un nuage sans pattes », « un taureau au corps d'araignée »…), sans rien imposer ni interdire. Le dessin respecte ta description.
+- **Créer** : tu écris ce que tu veux (« juste un œil géant », « une vache avec une seule corne », « un taureau au corps d'araignée »…), sans rien imposer ni interdire. L'appli dessine d'abord **3 esquisses** en une demi-minute : tu choisis la plus fidèle, et le dos, le profil et la marche sont faits à partir d'elle.
 - **Directions** : la planche 4 directions × 3 pas. Chaque image a ses versions (◀ ▶) et chaque direction peut être refaite.
 - **Sprite Lab** :
   - un éditeur pixel 64×64 (crayon, gomme, pipette, seau, annuler / refaire) ;
@@ -30,7 +30,7 @@ ComfyUI démarre tout seul à la première invocation et s'arrête quand tu ferm
 
 ## Combien de temps
 
-Environ 2 à 3 minutes par créature sur une RTX 4060 : le design, puis le dos et le profil (deux essais chacun, le meilleur est gardé automatiquement), puis la marche.
+Sur une RTX 4060 : une demi-minute pour les 3 esquisses, puis 2 à 3 minutes pour le dos et le profil (deux essais chacun, le meilleur est gardé automatiquement) et la marche. Les images de marche reprennent exactement les couleurs de la pose de repos.
 
 ## Permissions
 

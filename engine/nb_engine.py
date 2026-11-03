@@ -44,12 +44,55 @@ KEEP = (" Keep the identical design, colors, proportions and pixel art style, an
         "Plain flat light gray background, no cast shadow.")
 
 
+# parties qu'on compte : le modèle retombe sur l'anatomie habituelle (une vache a 2 cornes) si on n'insiste pas
+COUNTABLE = {"head": ("head", "heads"), "tail": ("tail", "tails"), "legs": ("leg", "legs"), "arms": ("arm", "arms"),
+             "wings": ("wing", "wings"), "horns": ("horn", "horns"), "eyes": ("eye", "eyes"),
+             "tentacles": ("tentacle", "tentacles"), "pincers": ("pincer", "pincers"), "ears": ("ear", "ears"),
+             "fins": ("fin", "fins"), "fangs": ("fang", "fangs"), "hands": ("hand", "hands")}
+SINGLE = {"horns": "a single horn growing from the middle of the forehead, like a unicorn's horn, not a pair of horns",
+          "eyes": "a single eye in the middle of the face, like a cyclops, not a pair of eyes"}  # où va « la seule »
+PAIRED = {"horns", "eyes", "wings", "ears", "arms", "legs", "pincers", "fangs", "hands", "fins"}  # « une corne » compte
+ONE_RE = nb_core.re.compile(r"\b(?:un|une)\s+(?:seule?\s+)?(?:[a-z]+\s+)?(" + nb_core._PART_ALT + r")\b")
+
+
+def counts(description):
+    """{partie: nombre} demandés explicitement (« six tentacules », « une corne », « un seul œil »)."""
+    spec = nb_core.analyze("", description)
+    out = {k: n for k, n in spec.counts.items() if k in COUNTABLE}
+    ones = {}
+    for m in ONE_RE.finditer(nb_core.fold(description)):
+        word = m.group(1)
+        slot = nb_core.PARTS[word][0]
+        if slot in PAIRED and not word.endswith(("s", "x")) and slot not in out:  # singulier seulement
+            ones[slot] = ones.get(slot, 0) + 1  # « un œil rouge et un œil bleu » = 2
+    return {**ones, **out}
+
+
+def count_line(description):
+    """Phrase affirmative (jamais « pas de corne sur les côtés » : nommer ce qu'on ne veut pas le fait dessiner)."""
+    parts = []
+    for slot, n in counts(description).items():
+        one, many = COUNTABLE[slot]
+        parts.append(f"exactly ONE {one} (1), " + SINGLE.get(slot, f"a single {one}") if n == 1
+                     else f"exactly {nb_core.num_en(n)} {many} ({n})")
+    if not parts:
+        return ""
+    return (" Count carefully: " + "; ".join(parts) + ". Draw exactly this number, "
+            "as described, not the usual anatomy.")
+
+
 def design_prompt(description):
-    return f"{description.strip()}\n\n{STYLE} {FACING['bas']}"
+    return f"{description.strip()}{count_line(description)}\n\n{STYLE} {FACING['bas']}"
 
 
-def view_prompt(direction):
-    return FACING[direction] + KEEP
+# profil d'une créature à pattes : sans ça le corps se tasse (vache trapue, pattes cachées)
+PROPORTIONS = (" Same proportions as the front view: same head size, same leg length and body size, drawn true to scale "
+               "(the side view is as tall as the front view); all legs fully visible and straight under the body, "
+               "feet on the ground.")
+
+
+def view_prompt(direction, legs=False):
+    return FACING[direction] + (PROPORTIONS if legs and direction == "gauche" else "") + KEEP
 
 
 def _loaders(g, model):
@@ -213,21 +256,25 @@ def generate_design(client, description, seed, progress=lambda m: None, cancel=l
     return render(client, MODEL, design_prompt(description), seed, cancel=cancel, cut=True)
 
 
-def generate_directions(client, design, seed, progress=lambda m: None, cancel=lambda: False, tries=TRIES):
+def generate_directions(client, design, seed, progress=lambda m: None, cancel=lambda: False, tries=TRIES, legs=False):
     """{direction: [versions, la meilleure d'abord]} ; droite = miroir de gauche (même créature, garanti)."""
     out = {"bas": [design]}
     out["haut"] = _best(client, view_prompt("haut"), [design], "haut", seed + 7, tries, cancel, progress, "Vue de dos")
-    # face + dos en références : le modèle comprend le volume et ne réinvente pas le corps en tournant de 90°
-    out["gauche"] = _best(client, view_prompt("gauche"), [design, out["haut"][0]], "gauche", seed + 7, tries, cancel,
+    # à pattes : le design seul (le dos en référence laisse sa raie sur le flanc et tasse le corps) ;
+    # sans pattes (œil, pieuvre) : face + dos, sinon le modèle invente un corps à quatre pattes en tournant de 90°
+    refs = [design] if legs else [design, out["haut"][0]]
+    out["gauche"] = _best(client, view_prompt("gauche", legs), refs, "gauche", seed + 7, tries, cancel,
                           progress, "Profil")
     out["droite"] = [ImageOps.mirror(im) for im in out["gauche"]]
     return out
 
 
-def generate_view(client, refs, direction, seed, progress=lambda m: None, cancel=lambda: False):
+def generate_view(client, refs, direction, seed, progress=lambda m: None, cancel=lambda: False, legs=False):
     """Une nouvelle version d'une vue (« Refaire ») : refs = [design] ou [design, dos] pour le profil."""
     label = {"haut": "Vue de dos", "gauche": "Profil"}[direction]
-    return _best(client, view_prompt(direction), refs, direction, seed, 1, cancel, progress, label)[0]
+    if legs:
+        refs = refs[:1]
+    return _best(client, view_prompt(direction, legs), refs, direction, seed, 1, cancel, progress, label)[0]
 
 
 def generate_walk(client, view, direction, description, seed, progress=lambda m: None, cancel=lambda: False):
@@ -247,7 +294,7 @@ def generate_walk(client, view, direction, description, seed, progress=lambda m:
 def generate_creature(client, description, seed, progress=lambda m: None, cancel=lambda: False):
     """Tout d'un coup : {"design", "directions": {d: [versions]}, "walk": {d: [3 images]}}."""
     design = generate_design(client, description, seed, progress, cancel)
-    dirs = generate_directions(client, design, seed, progress, cancel)
+    dirs = generate_directions(client, design, seed, progress, cancel, legs=has_legs(description))
     walk = {}
     for d in ("bas", "haut", "gauche"):
         walk[d] = generate_walk(client, dirs[d][0], d, description, seed, progress, cancel)

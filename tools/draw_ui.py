@@ -21,6 +21,11 @@ PAL = {
     "w": "#fff4dc",
     "s": "#241c30", "S": "#31263f", "t": "#3c3050",
     "e": "#7ad7f0", "E": "#2f7fa8",
+    # sol de l'aperçu en jeu : herbe 1-5, terre 6-9
+    "1": "#1d4a2c", "2": "#2b6a3a", "3": "#3d8b46", "4": "#5eae4e", "5": "#9fd86a",
+    "6": "#563620", "7": "#76502f", "8": "#946840", "9": "#bb8c5a",
+    # mur : joint, pierres (3 tons), mousse
+    "m": "#120d19", "u": "#2b2238", "U": "#463a5a", "o": "#2f5a3a", "O": "#4c7e45",
 }
 
 
@@ -599,44 +604,53 @@ ICONS["dossier"] = outline(grid([
 ]))
 
 # ---------------------------------------------------------------- emblème 32 x 32 : tête de bête dont les cornes débordent du sceau
-BEAST = outline(grid([
-    "................................",
-    ".P............................P.",
-    ".qP..........................Pq.",
-    ".qP..........................Pq.",
-    "..qP........................Pq..",
-    "..QqP......................PqQ..",
-    "...QqP....................PqQ...",
-    "....QqPP................PPqQ....",
-    ".....QqqPP............PPqqQ.....",
-    "......QQqqPvvvvvvvvvvPqqQQ......",
-    "........QQvllllllllllvQQ........",
-    ".......pvvlvvvvvvvvvvlvvp.......",
-    "......pvvlvvvvvvvvvvvvlvvp......",
-    "......pvlkkkvvvvvvvvkkklvp......",
-    "......pvvkkgwkvvvvkwgkkvvp......",
-    "......pvvvkGGgkvvkgGGkvvvp......",
-    "......pvvvvkkkvvvvkkkvvvvp......",
-    "......pvvvvvvvvvvvvvvvvvvp......",
-    ".......pvvvvvvkvvkvvvvvvp.......",
-    ".......pvvvvvvvvvvvvvvvvp.......",
-    "........pkkkkkkkkkkkkkkp........",
-    "........pkwkRRRRRRRRkwkp........",
-    ".........pkwkRRRRRRkwkp.........",
-    "..........pkkwkkkkwkkp..........",
-    "...........ppvvvvvvpp...........",
-    ".............pppppp.............",
-    "................................",
-    "................................",
-    "................................",
-    "................................",
-    "................................",
-    "................................",
-]))
+# moitié gauche dessinée à la main, miroir pour la droite ; la lumière vient d'en haut à gauche
+BEAST_HALF = [
+    "................",
+    "..P.............",
+    "..qP............",
+    "..qP............",
+    "..QqP...........",
+    "...QqP..........",
+    "...QqqP.........",
+    "....QqqP........",
+    ".....QQqP.......",
+    "......QQqP......",
+    ".......QQqpvvvvv",
+    "........pvllllll",
+    "........pvlvvvvE",
+    "........pvlvvvve",
+    "........pvkkvvvv",
+    "........pvggkkvv",
+    "........pvGwggkv",
+    "........pvvGGkvv",
+    ".........pvvvvvv",
+    ".........pvvvvvv",
+    ".........pvvvvkv",
+    "..........pkkkkk",
+    "..........pkwRRR",
+    "...........pkwrr",
+    "............pkkk",
+    ".............ppp",
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
+]
+
+
+def beast():
+    rows = []
+    for half in BEAST_HALF:
+        right = half[::-1].replace("l", "v")      # côté droit dans l'ombre : pas de reflet
+        rows.append(half + right)
+    return outline(grid(rows))
 
 
 def seal(size=32, r=13.5, cy=16.5):
-    """Disque de laiton (lumière en haut à gauche) au fond d'encre."""
+    """Sceau de laiton (lumière en haut à gauche), rivets aux diagonales, fond d'encre qui s'éclaircit au centre."""
     g = [["."] * size for _ in range(size)]
     cx = (size - 1) / 2
     for y in range(size):
@@ -644,11 +658,23 @@ def seal(size=32, r=13.5, cy=16.5):
             d = ((x - cx) ** 2 + (y - cy) ** 2) ** .5
             if d <= r + .3:
                 lit = (x - cx) + (y - cy) < 0
-                g[y][x] = "k" if d > r - .7 else ("B" if lit else "n") if d > r - 1.7 else "b" if d > r - 2.7 else "K"
+                if d > r - .7:
+                    ch = "k"
+                elif d > r - 1.7:
+                    ch = "B" if lit else "n"
+                elif d > r - 2.7:
+                    ch = "b"
+                elif d > r - 3.4:
+                    ch = "k"
+                else:
+                    ch = "d" if d < r - 8 else "K"
+                g[y][x] = ch
+    for x, y in ((7, 8), (24, 8), (7, 25), (24, 25)):   # rivets
+        g[y][x] = "w" if y < 16 and x < 16 else "B"
     return g
 
 
-EMBLEM = [[h if h != "." else s_ for h, s_ in zip(hr, sr)] for hr, sr in zip(BEAST, seal())]
+EMBLEM = [[h if h != "." else s_ for h, s_ in zip(hr, sr)] for hr, sr in zip(beast(), seal())]
 
 # ---------------------------------------------------------------- curseur 12 x 12
 CURSOR = grid([
@@ -666,27 +692,49 @@ CURSOR = grid([
     ".....kk.....",
 ])
 
-# ---------------------------------------------------------------- fond : dalle de pierre 32 x 32 (se répète) + poussière
+# ---------------------------------------------------------------- fond : mur de briques 64 x 64 (se répète)
+import random
+
+# chaque brique : (ton de face, lumière en haut à gauche, ombre en bas)
+BRICK_TONES = [("s", "S", "K"), ("u", "S", "K"), ("S", "t", "u"), ("u", "U", "s"), ("s", "u", "K")]
+CRACK = ["k..", ".k.", ".kk"]  # fissure posée sur quelques briques
+
+
 def stone():
-    rows = []
-    for y in range(32):
-        r = []
-        for x in range(32):
-            band = y // 8
-            off = 8 if band % 2 else 0
-            jx = (x + off) % 16
-            if y % 8 == 7 or jx == 15:
-                ch = "k"
-            elif y % 8 == 0 or jx == 0:
-                ch = "S"
-            else:
-                ch = "s"
-            r.append(ch)
-        rows.append(r)
-    for (y, x, ch) in ((3, 5, "S"), (4, 6, "S"), (11, 20, "S"), (12, 21, "S"), (19, 9, "d"), (20, 9, "d"),
-                       (21, 10, "d"), (27, 25, "S"), (26, 26, "t"), (5, 27, "d"), (13, 3, "t"), (29, 14, "S")):
-        rows[y][x] = ch
-    return rows
+    rnd = random.Random(7)
+    W = H = 64
+    g = [["m"] * W for _ in range(H)]
+    for row in range(H // 8):
+        off = 8 if row % 2 else 0
+        for col in range(W // 16):
+            face, hi, lo = rnd.choice(BRICK_TONES)
+            x0, y0 = col * 16 - off, row * 8
+            for dy in range(7):           # 15 x 7 de pierre, joint de 1 px à droite et en bas
+                for dx in range(15):
+                    x, y = (x0 + dx) % W, y0 + dy
+                    ch = face
+                    if dy == 0 or dx == 0:
+                        ch = hi
+                    if dy == 6 or dx == 14:
+                        ch = lo
+                    g[y][x] = ch
+            for cx, cy in ((0, 0), (14, 0), (0, 6), (14, 6)):   # coins usés
+                if rnd.random() < .35:
+                    g[y0 + cy][(x0 + cx) % W] = "m"
+            for _ in range(rnd.randint(1, 3)):                   # grain de la pierre
+                g[y0 + rnd.randint(1, 5)][(x0 + rnd.randint(1, 13)) % W] = rnd.choice((hi, lo))
+            if rnd.random() < .18:                                # fissure
+                fx, fy = rnd.randint(2, 10), rnd.randint(1, 3)
+                for yy, line in enumerate(CRACK):
+                    for xx, ch in enumerate(line):
+                        if ch == "k":
+                            g[y0 + fy + yy][(x0 + fx + xx) % W] = "K"
+            if rnd.random() < .1:                                 # mousse discrète au pied de la brique
+                for dx in range(rnd.randint(2, 5)):
+                    if rnd.random() < .75:
+                        g[y0 + 6][(x0 + 3 + dx) % W] = "o"
+                g[y0 + 5][(x0 + 4) % W] = "o"
+    return g
 
 
 DUST = grid([   # 3 images de 5 px : une poussière qui scintille
@@ -695,43 +743,78 @@ DUST = grid([   # 3 images de 5 px : une poussière qui scintille
     "..w..|.....|..q..".replace("|", ""),
 ])
 
-# ---------------------------------------------------------------- tuiles de sol pour l'aperçu en jeu (16 x 16)
-GRASS = grid([
-    "GGGGGGGGGGGGGGGG",
-    "GGGgGGGGGGGGhGGG",
-    "GGgGGGGGGGGGGGGG",
-    "GGGGGGGGGhGGGGGG",
-    "GGGGGGGGGGGGGGgG",
-    "GhGGGGGgGGGGGGGG",
-    "GGGGGGgGGGGGGGGG",
-    "GGGGGGGGGGGGGGGG",
-    "GGGGGGGGGGGhGGGG",
-    "GGGgGGGGGGGGGGGG",
-    "GGGGGGGGGGGGGGGG",
-    "GGGGGGGGGgGGGGGG",
-    "GGhGGGGGgGGGGGgG",
-    "GGGGGGGGGGGGGGGG",
-    "GGGGGGGGGGGGhGGG",
-    "GGGGGgGGGGGGGGGG",
-])
-PATH = grid([
-    "qqqqqqqqqqqqqqqq",
-    "qPqqqqqqqQqqqqqq",
-    "qqqqQqqqqqqqqPqq",
-    "qqqqqqqqqqqqqqqq",
-    "qqqqqqqPqqqqqqqq",
-    "qQqqqqqqqqqqQqqq",
-    "qqqqqqqqqqqqqqqq",
-    "qqqqqqqqqqQqqqqq",
-    "qqqPqqqqqqqqqqqq",
-    "qqqqqqqqqqqqqqPq",
-    "qqqqqqQqqqqqqqqq",
-    "qqqqqqqqqqqqqqqq",
-    "qQqqqqqqqPqqqqqq",
-    "qqqqqqqqqqqqqQqq",
-    "qqqqqPqqqqqqqqqq",
-    "qqqqqqqqqqqqqqqq",
-])
+# ---------------------------------------------------------------- sol de l'aperçu en jeu (32 x 32, se répète)
+TUFT = ["..5..", "5.4.5", "4.4.4", ".242."]
+FLOWER_W = [".w.", "wBw", ".4."]
+FLOWER_B = [".e.", "eEe", ".4."]
+PEBBLE = [".99.", "9888", "8886", ".66."]
+PEBBLE_S = ["98", "86"]
+
+
+def _stamp(g, shape, x, y):
+    h, w = len(g), len(g[0])
+    for dy, line in enumerate(shape):
+        for dx, ch in enumerate(line):
+            if ch != ".":
+                g[(y + dy) % h][(x + dx) % w] = ch
+
+
+def _mottle(base, dark, light, seed, size=32):
+    """Fond en taches douces (pas de bruit pixel à pixel) : sommes de sinus qui se raccordent aux bords."""
+    import math
+    rnd = random.Random(seed)
+    dirs = [(1, 0), (0, 1), (1, 2), (2, -1), (2, 1), (-1, 3), (3, 1), (1, -2)]
+    waves = [(a, b, rnd.random() * 6.28) for a, b in rnd.sample(dirs, 6)]  # directions variées : pas de bandes
+    g = []
+    for y in range(size):
+        r = []
+        for x in range(size):
+            v = sum(math.sin(2 * math.pi * (a * x + b * y) / size + ph) for a, b, ph in waves) / 6
+            v += (rnd.random() - .5) * .3
+            r.append(dark if v < -.3 else light if v > .32 else base)
+        g.append(r)
+    return g
+
+
+def grass():
+    g = _mottle("3", "2", "4", 11)
+    for x, y in ((2, 3), (19, 1), (11, 12), (26, 14), (4, 22), (17, 25), (28, 27)):
+        _stamp(g, TUFT, x, y)
+    for x, y in ((8, 6), (23, 21), (13, 29), (30, 8)):
+        g[y][x] = "1"
+    _stamp(g, FLOWER_W, 13, 4)
+    _stamp(g, FLOWER_B, 25, 6)
+    _stamp(g, FLOWER_W, 9, 17)
+    return g
+
+
+def path():
+    g = _mottle("7", "6", "8", 23)
+    for x, y in ((3, 4), (21, 9), (10, 22), (26, 25)):
+        _stamp(g, PEBBLE, x, y)
+    for x, y in ((14, 2), (6, 13), (29, 17), (17, 15), (1, 28), (19, 29)):
+        _stamp(g, PEBBLE_S, x, y)
+    for x, y in ((9, 8), (10, 9), (11, 9), (24, 3), (25, 4), (15, 26), (16, 26)):  # sillons
+        g[y][x] = "6"
+    return g
+
+
+def road():
+    """Chemin de 32 px de haut bordé d'herbe en haut et en bas (l'herbe déborde en brins sur la terre)."""
+    g = path()
+    top = grass()
+    rnd = random.Random(5)
+    for x in range(32):
+        edge = 3 + (1 if rnd.random() < .45 else 0) + (1 if x % 7 == 3 else 0)
+        for y in range(edge):
+            g[y][x] = top[y][x]
+        g[edge - 1][x] = "5" if rnd.random() < .3 else "4"
+        g[edge][x] = "6"                                     # ombre de l'herbe sur la terre
+        bot = 3 + (1 if rnd.random() < .45 else 0) + (1 if x % 5 == 1 else 0)
+        for y in range(32 - bot, 32):
+            g[y][x] = top[y][x]
+        g[32 - bot][x] = "5" if rnd.random() < .35 else "4"
+    return g
 
 
 def build():
@@ -754,8 +837,9 @@ def build():
     out["cursor"] = img(CURSOR)
     out["stone"] = img(stone())
     out["dust"] = img(DUST)
-    out["grass"] = img(GRASS)
-    out["path"] = img(PATH)
+    out["grass"] = img(grass())
+    out["path"] = img(path())
+    out["road"] = img(road())
     for k, im in out.items():
         im.save(UI / f"{k}.png")
     return out

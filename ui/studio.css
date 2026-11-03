@@ -8,7 +8,7 @@
   --glow: #7dffb0; --glow2: #2fae6e; --red: #e0525c; --white: #fff4dc;
   position: relative; min-height: 100%; box-sizing: border-box; padding: 16px 20px 24px;
   font: 22px/24px "Grimoire", monospace; color: var(--parch); letter-spacing: 0;
-  background: #241c30 url(stone.png) 0 0 / 64px 64px; image-rendering: pixelated;
+  background: #241c30 url(stone.png) 0 0 / 128px 128px; image-rendering: pixelated;
   -webkit-font-smoothing: none; font-smooth: never; user-select: none;
   cursor: url(cursor.png) 0 0, default; overflow: hidden;
 }
@@ -113,7 +113,7 @@
 
 /* sprite lab */
 .nbs-tools { display: grid; grid-template-columns: 48px 48px; gap: 6px; }
-.nbs-canvas { width: 384px; height: 384px; background: #2a1f38 url(stone.png) 0 0 / 28px; position: relative; box-shadow: 0 0 0 4px var(--ink0), 0 0 0 8px var(--brass2), 0 0 0 12px var(--ink0); }
+.nbs-canvas { width: 384px; height: 384px; background: #2a1f38 url(stone.png) 0 0 / 64px; position: relative; box-shadow: 0 0 0 4px var(--ink0), 0 0 0 8px var(--brass2), 0 0 0 12px var(--ink0); }
 .nbs-canvas canvas, .nbs-canvas img { position: absolute; inset: 0; width: 100%; height: 100%; image-rendering: pixelated; }
 .nbs-canvas.grid::after { content: ""; position: absolute; inset: 0; pointer-events: none;
   background: linear-gradient(90deg, rgba(13, 10, 20, .35) 1px, transparent 1px) 0 0 / 6px 6px,
@@ -123,7 +123,7 @@
 .nbs-swatches i.on { box-shadow: 0 0 0 2px var(--ink0), 0 0 0 4px var(--white); }
 .nbs-world { width: 100%; height: 256px; position: relative; overflow: hidden; background: url(grass.png) 0 0 / 64px;
   box-shadow: 0 0 0 4px var(--ink0), 0 0 0 8px var(--brass3); }
-.nbs-world .road { position: absolute; left: 0; right: 0; top: 128px; height: 64px; background: url(path.png) 0 0 / 64px; }
+.nbs-world .road { position: absolute; left: 0; right: 0; top: 128px; height: 64px; background: url(road.png) 0 0 / 64px; }
 .nbs-world .hero { position: absolute; width: 128px; height: 128px; image-rendering: pixelated; }
 .nbs-keys { color: var(--parch2); text-shadow: 2px 2px 0 var(--ink0); }
 .nbs-opt { display: flex; align-items: center; gap: 10px; color: var(--parch); text-shadow: 2px 2px 0 var(--ink0); }
@@ -152,3 +152,10 @@
 .nbs-thumb-empty { width: 128px; height: 128px; margin: 0 auto 4px; display: grid; place-items: center; font-size: 44px; color: var(--parch3); }
 .nbs-sheet .cell { cursor: inherit; }
 .nbs-ver span { min-width: 120px; text-align: center; }
+
+/* esquisses du design à choisir */
+.nbs-sketches { gap: 18px; flex-wrap: wrap; padding: 8px; margin-bottom: 10px; }
+.nbs-sketch { border: 0; font: inherit; color: inherit; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 6px; background: url(grass.png) 0 0 / 64px; box-shadow: 0 0 0 4px var(--ink0), 0 0 0 8px var(--brass3); }
+.nbs-sketch img { width: 112px; height: 112px; object-fit: contain; image-rendering: pixelated; }
+.nbs-sketch:hover { box-shadow: 0 0 0 4px var(--ink0), 0 0 0 8px var(--brass); }
+.nbs-sketch .nbs-btn { pointer-events: none; }

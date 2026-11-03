@@ -147,6 +147,28 @@ def mode_downscale(img, width, height, colors=32):
     return out
 
 
+def match_colors(img, ref):
+    """Recale les couleurs de img sur celles de ref (histogramme par canal, pixels opaques seulement).
+
+    Pour un pas de marche généré depuis sa pose de repos : même créature, mêmes surfaces, mais le modèle dérive
+    un peu (plus clair, plus rose). Sans numpy : image rendue telle quelle.
+    """
+    if _np is None:
+        return img
+    a, r = _np.asarray(img.convert("RGBA")).copy(), _np.asarray(ref.convert("RGBA"))
+    ma, mr = a[..., 3] >= 128, r[..., 3] >= 128
+    if ma.sum() < 16 or mr.sum() < 16:
+        return img
+    for c in range(3):
+        src, dst = a[..., c][ma], r[..., c][mr]
+        sv, si, sc = _np.unique(src, return_inverse=True, return_counts=True)
+        dv, dc = _np.unique(dst, return_counts=True)
+        sq, dq = _np.cumsum(sc) / src.size, _np.cumsum(dc) / dst.size
+        ch = a[..., c]
+        ch[ma] = _np.interp(sq, dq, dv)[si].round().astype(_np.uint8)
+    return Image.fromarray(a, "RGBA")
+
+
 def pixel_clean(img, grid=128, colors=28):
     """Nettoie une génération SDXL : grille de `grid` pixels, `colors` couleurs, bords nets, puis agrandit
     chaque pixel (NEAREST) à la taille d'origine pour garder un fichier de même format."""

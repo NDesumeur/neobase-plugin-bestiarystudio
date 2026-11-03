@@ -47,7 +47,13 @@ const HTML = `<link rel="stylesheet" href="${U}ui/studio.css">
           <div class="nbs-sep"></div>
           <div class="nbs-bar"><i id="bar" style="width:0"></i></div>
           <div class="nbs-step" id="step">&nbsp;</div>
-          <div class="nbs-hint" id="stepHint">Compte 2 à 3 minutes : le design, le dos, le profil puis la marche.</div>
+          <div class="nbs-hint" id="stepHint">D'abord 3 esquisses (une demi-minute) : tu choisis la plus fidèle, puis 2 à 3 minutes pour le dos, le profil et la marche.</div>
+          <div id="sketches" hidden>
+            <div class="nbs-sep"></div>
+            <div class="nbs-title">Choisis ton design</div>
+            <div class="nbs-row nbs-sketches" id="sketchRow"></div>
+            <div class="nbs-hint">Aucune ne va ? Change la graine ou ta description et invoque à nouveau.</div>
+          </div>
         </div>
         <div>
           <div class="nbs-title" id="liveTitle">Grimoire vivant</div>
@@ -205,7 +211,7 @@ export default async function (ctx) {
     });
     busy(false);
     if (j.error) { say(j.error, true); return null; }
-    say('Créature invoquée ✓');
+    say(j.kind === 'sketch' ? 'Choisis ton design ↓' : 'Créature invoquée ✓');
     get('/status').then(status).catch(() => {});
     if (j.slug) await open(j.slug);
     return j;
@@ -230,8 +236,19 @@ export default async function (ctx) {
     S.stamp = Date.now();
     $('#liveTitle').textContent = S.cr.name;
     $('#dirTitle').textContent = S.cr.name + ' · 4 directions × 3 pas · 64×64';
-    renderSheet(); renderLab();
+    renderSheet(); renderLab(); renderSketches();
     if (S.tab === 'lab') loadFrame();
+  }
+  function renderSketches() {  // esquisses pas encore choisies : on les montre, un clic lance le reste
+    const box = $('#sketches'), pending = !!S.cr?.pending;
+    box.hidden = !pending;
+    if (!pending) return;
+    $('#sketchRow').innerHTML = S.cr.designs.map((f, i) => `<button class="nbs-sketch" data-i="${i}" title="Continuer avec celle-ci">
+      <img src="${src(f)}" alt=""><span class="nbs-btn go">${ic('ok')}Celle-ci</span></button>`).join('');
+    $$('#sketchRow .nbs-sketch').forEach(b => b.onclick = () => {
+      box.hidden = true;
+      runJob(() => post('/continue', { slug: S.cr.slug, index: +b.dataset.i }));
+    });
   }
   const refresh = cr => { S.cr = cr; S.stamp = Date.now(); renderSheet(); renderLab(); if (S.tab === 'lab') loadFrame(); };
 
@@ -267,7 +284,7 @@ export default async function (ctx) {
   const anim = setInterval(() => {
     if (!view.isConnected) { clearInterval(anim); S.alive = false; return; }
     tick++;
-    if (S.cr) $$('img.w').forEach(i => { const s = sprite(i.dataset.d, CYCLE[tick % 4]); if (i.getAttribute('src') !== s) i.src = s; });
+    if (S.cr) $$('img.w').forEach(i => { const s = sprite(i.dataset.d, CYCLE[tick % 4]); if (i.getAttribute('src') !== s) i.src = s; i.style.visibility = s ? '' : 'hidden'; });
     if (S.tab !== 'lab' || !S.cr) return;
     const k = [...hero.keys].pop(), world = $('#world');
     if (k) {
@@ -427,7 +444,7 @@ export default async function (ctx) {
           return loadLib();
         }
         await open(card.dataset.s);
-        show('dirs');
+        show(S.cr.pending ? 'creer' : 'dirs');
       };
     });
   }

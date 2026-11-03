@@ -24,12 +24,12 @@ def generate_design(client, description, seed, progress=lambda m: None, cancel=l
     return _blob(COLORS["bas"], seed)
 
 
-def generate_view(client, refs, direction, seed, progress=lambda m: None, cancel=lambda: False):
+def generate_view(client, refs, direction, seed, progress=lambda m: None, cancel=lambda: False, legs=False):
     progress(direction)
     return _blob(COLORS[direction], seed)
 
 
-def generate_directions(client, design, seed, progress=lambda m: None, cancel=lambda: False, tries=TRIES):
+def generate_directions(client, design, seed, progress=lambda m: None, cancel=lambda: False, tries=TRIES, legs=False):
     out = {"bas": [design]}
     for d in ("haut", "gauche"):
         out[d] = []

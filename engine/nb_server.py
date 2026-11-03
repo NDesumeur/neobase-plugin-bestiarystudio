@@ -28,6 +28,7 @@ import nb_sprite as sp  # noqa: E402
 DIRS = ("bas", "gauche", "droite", "haut")
 FRAMES = ("pas1", "repos", "pas2")  # colonnes de la planche ; lecture : pas1, repos, pas2, repos
 CELL = 64
+SKETCHES = 3  # esquisses du design proposées au choix avant le reste
 LAB_DEFAULTS = dict(colors=24, outline=True, outline_color="#0b0b12", lock_palette=True, mirror=True)
 
 
@@ -158,24 +159,47 @@ class Studio:
         rec.update(slug=self._unique_slug(name), description=description, seed=seed, lab=dict(LAB_DEFAULTS))
         self.lib.save(rec)
         slug = rec["slug"]
-        legs = self.eng.has_legs(description)
 
-        def run(progress, cancel):
+        def run(progress, cancel):  # 1re étape : des esquisses du design, l'utilisateur choisit la bonne (/continue)
             c = self.client()
-            design = self.eng.generate_design(c, description, seed, progress, cancel)
-            self.lib.add_pil(slug, "bas", design, "design")
-            dirs = self.eng.generate_directions(c, design, seed, progress, cancel)
-            for d in ("haut", "gauche"):  # droite : le miroir de la gauche active, posé par _mirror_walk
-                for i, im in enumerate(dirs[d]):
-                    self.lib.add_pil(slug, d, im, f"graine {seed}")
-                self.lib.set_active(slug, d, 0)
-            for d in ("bas", "haut", "gauche"):
-                self._walk(c, slug, d, progress, cancel)
-            self._mirror_walk(slug)
-            self.build_sprites(slug)
+            for i in range(SKETCHES):
+                design = self.eng.generate_design(c, description, seed + i, progress, cancel)
+                self.lib.add_pil(slug, "bas", design, f"esquisse {i + 1}")
+            self.lib.set_active(slug, "bas", 0)
             return slug
-        total = 1 + 2 * self.eng.TRIES + (6 if legs else 0)
-        return self.jobs.start("create", run, total, slug), slug
+        return self.jobs.start("sketch", run, SKETCHES, slug), slug
+
+    def _rest(self, c, slug, seed, progress, cancel):
+        """Dos, profils et marche à partir du design actif (tout est refait : les 4 directions restent cohérentes)."""
+        rec = self.lib.load(slug)
+        design = self._active(slug, "bas")
+        dirs = self.eng.generate_directions(c, design, seed, progress, cancel, legs=self.eng.has_legs(rec["description"]))
+        for d in ("haut", "gauche"):  # droite : le miroir de la gauche active, posé par _mirror_walk
+            n = len(rec.get("views", {}).get(d, {}).get("files", []))
+            for im in dirs[d]:
+                self.lib.add_pil(slug, d, im, f"graine {seed}")
+            self.lib.set_active(slug, d, n)
+        for d in ("bas", "haut", "gauche"):
+            self._walk(c, slug, d, progress, cancel)
+        self._mirror_walk(slug)
+        self.build_sprites(slug)
+        return slug
+
+    def _rest_steps(self, slug):
+        legs = self.eng.has_legs(self.lib.load(slug)["description"])
+        return 2 * self.eng.TRIES + (6 if legs else 0)
+
+    def finish(self, slug, index):
+        """Le design choisi parmi les esquisses devient la créature : directions et marche."""
+        rec = self.lib.load(slug)
+        if rec is None:
+            raise ValueError("Créature introuvable.")
+        if self.jobs.get()["running"]:
+            raise RuntimeError("Une tâche est déjà en cours.")
+        self.lib.set_active(slug, "bas", int(index))
+        seed = int(rec["seed"]) + int(index)
+        return self.jobs.start("create", lambda progress, cancel: self._rest(self.client(), slug, seed, progress, cancel),
+                               self._rest_steps(slug), slug)
 
     def _active(self, slug, key):
         rec = self.lib.load(slug)
@@ -214,12 +238,15 @@ class Studio:
         def run(progress, cancel):
             c = self.client()
             seed = int(time.time()) % 1000000
-            if d == "bas":
+            if d == "bas":  # nouveau design : tout le reste suit, sinon dos et profil montrent l'ancienne créature
                 im = self.eng.generate_design(c, rec["description"], seed, progress, cancel)
+                self.lib.add_pil(slug, "bas", im, f"graine {seed}")
+                self.lib.set_active(slug, "bas", 10 ** 6)
+                return self._rest(c, slug, seed, progress, cancel)
             else:
                 src = "gauche" if d == "droite" else d
                 refs = [self._active(slug, "bas")] + ([self._active(slug, "haut")] if src == "gauche" else [])
-                im = self.eng.generate_view(c, refs, src, seed, progress, cancel)
+                im = self.eng.generate_view(c, refs, src, seed, progress, cancel, legs=legs)
                 if d == "droite":
                     im = ImageOps.mirror(im)
             self.lib.add_pil(slug, d, im, f"graine {seed}")
@@ -234,7 +261,8 @@ class Studio:
                 self._mirror_walk(slug)
             self.build_sprites(slug)
             return slug
-        return self.jobs.start("redo", run, 1 + (2 if legs else 0), slug)
+        total = 1 + (self._rest_steps(slug) if d == "bas" else (2 if legs else 0))
+        return self.jobs.start("redo", run, total, slug)
 
     def choose(self, slug, key, delta=None, index=None):
         """Change la version active d'une vue (direction ou pas) puis refait les sprites."""
@@ -263,7 +291,9 @@ class Studio:
         return dict(slug=slug, name=rec["name"], description=rec.get("description", ""), seed=rec.get("seed"),
                     lab=rec.get("lab", dict(LAB_DEFAULTS)), views=views, sprites=sprites,
                     palette=rec.get("sprite_palette", []), updated=rec.get("updated", 0),
-                    sheet="sprites/sheet.png" if (sd / "sheet.png").is_file() else None)
+                    sheet="sprites/sheet.png" if (sd / "sheet.png").is_file() else None,
+                    designs=rec.get("views", {}).get("bas", {}).get("files", []),
+                    pending=not rec.get("views", {}).get("haut"))  # esquisses pas encore choisies
 
     def library(self):
         out = []
@@ -273,7 +303,8 @@ class Studio:
             sd = self.lib.dir(rec["slug"]) / "sprites"
             nv = len(rec.get("views", {}).get("bas", {}).get("files", []))
             out.append(dict(slug=rec["slug"], name=rec["name"], updated=rec.get("updated", 0), versions=nv,
-                            thumb="sprites/bas_repos.png" if (sd / "bas_repos.png").is_file() else None))
+                            thumb="sprites/bas_repos.png" if (sd / "bas_repos.png").is_file()
+                            else (rec.get("views", {}).get("bas", {}).get("files") or [None])[0]))  # esquisse à choisir
         return out
 
     def delete(self, slug):
@@ -313,7 +344,8 @@ class Studio:
                 continue
             for f in FRAMES:
                 if row[f] is not None:
-                    items.append((f"{d}_{f}", _same_height(row[f], row["repos"])))
+                    im = row[f] if f == "repos" else sp.match_colors(_same_height(row[f], row["repos"]), row["repos"])
+                    items.append((f"{d}_{f}", im))  # les pas reprennent les couleurs exactes de la pose de repos
         if not items:
             return self.creature(slug)
         opts = dict(width=CELL, height=CELL, colors=int(lab["colors"]), outline=bool(lab["outline"]),
@@ -423,6 +455,7 @@ def make_handler(studio, token):
         "/create": lambda b: dict(zip(("job", "slug"), studio.create(b.get("name"), b.get("description"), b.get("seed")))),
         "/cancel": lambda b: studio.jobs.cancel() or dict(ok=True),
         "/redo": lambda b: dict(job=studio.redo(b["slug"], b["dir"])),
+        "/continue": lambda b: dict(job=studio.finish(b["slug"], b["index"])),
         "/choose": lambda b: studio.choose(b["slug"], b["key"], b.get("delta"), b.get("index")),
         "/lab": lambda b: studio.set_lab(b["slug"], b.get("opts", {})),
         "/rebuild": lambda b: studio.build_sprites(b["slug"]),
