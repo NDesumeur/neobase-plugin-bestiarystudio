@@ -99,34 +99,15 @@ def mode_downscale(img, width, height, colors=32):
     """Réduction « pixels nets » : chaque pixel de sortie = couleur dominante de son bloc d'origine.
 
     Contrairement à une moyenne (qui mélange les tons et donne du flou), la couleur dominante garde des
-    teintes franches. Les couleurs sont d'abord réduites à `colors` pour supprimer le bruit du décodeur.
+    teintes franches ; avec numpy, les petits détails contrastés (yeux) sont gardés (voir _salient_downscale).
     """
     img = img.convert("RGBA")
-    q = quantize_colors(img, colors)
     bx = max(1, round(img.width / width))
     by = max(1, round(img.height / height))
-    q = q.resize((width * bx, height * by), Image.Resampling.NEAREST)
     if _np is not None:
-        arr = _np.asarray(q)
-        keys = (arr[..., 0].astype(_np.int32) << 16) | (arr[..., 1].astype(_np.int32) << 8) | arr[..., 2].astype(_np.int32)
-        uniq, inv = _np.unique(keys, return_inverse=True)
-        inv = inv.reshape(keys.shape)
-        opaque = arr[..., 3] >= 128
-
-        def blocks(a):
-            return a.reshape(height, by, width, bx).transpose(0, 2, 1, 3).reshape(height, width, by * bx)
-
-        bi, bo = blocks(inv), blocks(opaque)
-        counts = _np.zeros((height, width, len(uniq)), dtype=_np.int32)
-        for k in range(len(uniq)):
-            counts[..., k] = ((bi == k) & bo).sum(-1)
-        best = counts.argmax(-1)
-        solid = bo.sum(-1) * 2 >= by * bx
-        palette = _np.stack([(uniq >> 16) & 255, (uniq >> 8) & 255, uniq & 255], axis=-1).astype(_np.uint8)
-        out = _np.zeros((height, width, 4), dtype=_np.uint8)
-        out[..., :3] = palette[best]
-        out[..., 3] = _np.where(solid, 255, 0)
-        return Image.fromarray(out, "RGBA")
+        return _salient_downscale(img.resize((width * bx, height * by), Image.Resampling.NEAREST), width, height, bx, by)
+    q = quantize_colors(img, colors)
+    q = q.resize((width * bx, height * by), Image.Resampling.NEAREST)
     # repli Python pur
     from collections import Counter
     px = q.load()
@@ -145,6 +126,40 @@ def mode_downscale(img, width, height, colors=32):
                 c = cnt.most_common(1)[0][0]
                 po[x, y] = (c[0], c[1], c[2], 255)
     return out
+
+
+DETAIL = 10.0  # poids d'un détail qui tranche sur son voisinage (yeux, pupilles, gemmes)
+
+
+def _salient_downscale(img, width, height, bx, by, detail=DETAIL):
+    """Couleur dominante de chaque bloc, mais un détail contrasté qui couvre au moins 12 % du bloc l'emporte.
+
+    Pas de réduction de palette avant : sur une image 1024, un œil fait 0,4 % des pixels et une palette de 48
+    couleurs le fondait dans la peau. Les couleurs sont regroupées par cases (4 bits par canal) et chaque bloc reçoit
+    la couleur moyenne de sa case gagnante."""
+    a = _np.asarray(img).reshape(height, by, width, bx, 4).transpose(0, 2, 1, 3, 4).reshape(height * width, by * bx, 4)
+    opaque = a[..., 3] >= 128
+    n_op = opaque.sum(1)
+    blk = _np.broadcast_to(_np.arange(height * width)[:, None], opaque.shape)[opaque]
+    rgb = a[..., :3][opaque].astype(_np.int64)
+    out = _np.zeros((height * width, 4), _np.uint8)
+    if not len(rgb):
+        return Image.fromarray(out.reshape(height, width, 4), "RGBA")
+    key = blk * 4096 + ((rgb[:, 0] >> 4) << 8 | (rgb[:, 1] >> 4) << 4 | rgb[:, 2] >> 4)
+    u, inv, cnt = _np.unique(key, return_inverse=True, return_counts=True)
+    mean = _np.stack([_np.bincount(inv, rgb[:, c]) for c in range(3)], -1) / cnt[:, None]
+    ub = u // 4096
+    bmean = _np.stack([_np.bincount(blk, rgb[:, c], height * width) for c in range(3)], -1) / _np.maximum(n_op, 1)[:, None]
+    grid = _np.pad(bmean.reshape(height, width, 3), ((1, 1), (1, 1), (0, 0)), mode="edge")
+    neigh = sum(grid[1 + dy:1 + dy + height, 1 + dx:1 + dx + width] for dy in (-1, 0, 1) for dx in (-1, 0, 1)) / 9
+    dist = _np.linalg.norm(mean - neigh.reshape(-1, 3)[ub], axis=1) / 255
+    share = cnt / _np.maximum(n_op[ub], 1)
+    score = share * _np.where(share >= .12, 1 + detail * dist ** 2, 1)
+    order = _np.lexsort((score, ub))
+    last = order[_np.r_[ub[order][1:] != ub[order][:-1], True]]  # meilleure case de chaque bloc
+    out[ub[last], :3] = mean[last].round().astype(_np.uint8)
+    out[:, 3] = _np.where(n_op * 2 >= by * bx, 255, 0)
+    return Image.fromarray(out.reshape(height, width, 4), "RGBA")
 
 
 def match_colors(img, ref):
@@ -224,8 +239,12 @@ def binarize_alpha(img, threshold=128):
 
 # ---------------------------------------------------------------- couleurs
 
-def quantize_colors(img, n_colors):
-    """Réduit le nombre de couleurs en gardant la transparence."""
+RARE = 60  # écart (RVB) au-delà duquel un pixel garde sa couleur : la palette médiane avale les petits détails
+
+
+def quantize_colors(img, n_colors, keep_rare=False):
+    """Réduit le nombre de couleurs en gardant la transparence. keep_rare : un pixel que la palette dénature
+    (un œil jaune sur une peau verte) garde sa couleur ; pour les sprites, pas pour une grande image bruitée."""
     img = img.convert("RGBA")
     alpha = img.getchannel("A")
     solid = alpha.point(lambda v: 255 if v >= 128 else 0)
@@ -239,13 +258,18 @@ def quantize_colors(img, n_colors):
                         dither=Image.Dither.NONE).convert("RGB")
     out = q.convert("RGBA")
     out.putalpha(alpha)
+    if keep_rare and _np is not None:
+        o, src = _np.asarray(out).copy(), _np.asarray(img)
+        far = (_np.linalg.norm(o[..., :3].astype(float) - src[..., :3], axis=-1) > RARE) & (src[..., 3] >= 128)
+        o[far, :3] = src[far, :3]
+        out = Image.fromarray(o, "RGBA")
     return out
 
 
 def extract_palette(img, n_colors=8):
     """Palette (hex) extraite des pixels opaques, triée du plus sombre au plus clair."""
     img = img.convert("RGBA")
-    q = quantize_colors(img, n_colors)
+    q = quantize_colors(img, n_colors, keep_rare=True)
     colors = {}
     px = q.load()
     for y in range(q.height):
@@ -394,12 +418,12 @@ def run_batch(images, opts, master_key="face", lock_palette=True, shared_scale=T
     elif ncol >= 2:
         idx = next((i for i, (k, _) in enumerate(sprites) if k == master_key), 0)
         if lock_palette:
-            master_q = quantize_colors(sprites[idx][1], ncol)
-            pal = extract_palette(master_q, ncol)
+            master_q = quantize_colors(sprites[idx][1], ncol, keep_rare=True)
+            pal = extract_palette(master_q, ncol + 16)  # master_q a déjà ses couleurs : on les reprend toutes
             sprites = [(k, master_q if i == idx else apply_palette(im, pal, "Couleur la plus proche"))
                        for i, (k, im) in enumerate(sprites)]
         else:
-            sprites = [(k, quantize_colors(im, ncol)) for k, im in sprites]
+            sprites = [(k, quantize_colors(im, ncol, keep_rare=True)) for k, im in sprites]
     if o["outline"]:
         sprites = [(k, add_outline(im, o["outline_color"])) for k, im in sprites]
     return sprites

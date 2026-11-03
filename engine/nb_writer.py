@@ -7,6 +7,8 @@ import json
 import random
 import urllib.request
 
+import nb_archetypes
+
 OLLAMA = "http://127.0.0.1:11434"
 PREFERRED = ("mistral-nemo", "mistral-small", "mistral", "qwen3:8b", "qwen2.5", "llama3.1", "gemma3", "gemma2")
 TYPES = ("feu", "eau", "plante", "vent", "roche", "glace", "foudre", "lumière", "ombre", "esprit", "acier", "poison")
@@ -114,22 +116,57 @@ def idea(theme="melange", seed=None):
 
 POSTURES = ("quatre_pattes", "deux_jambes", "plusieurs_pattes", "flotte", "vole", "rampe", "nage")
 SYS_BRIEF = (
-    "Tu aides un générateur d'images à comprendre une créature décrite en français. Tu lis la description avec soin, "
-    "sans rien inventer ni oublier, et tu réponds uniquement en JSON.")
+    "Tu es directeur artistique pour un jeu vidéo : tu prépares la consigne d'un générateur d'images à partir d'une "
+    "créature décrite en français. Tu connais très bien les monstres et créatures des jeux de rôle, de la mythologie, "
+    "du folklore et de Lovecraft, les animaux réels et les objets vivants (hydre, cerbère, chimère, mimique, tyrannœil, "
+    "golem, kitsune, gargouille, liche…) : quand la description en nomme un, tu donnes ses traits visuels typiques "
+    "(une hydre a plusieurs têtes sur des cous séparés, une mimique est un coffre avec des dents et une langue). "
+    "Tu ne contredis jamais la description : ses nombres et ses couleurs priment sur la tradition. "
+    "Tu réponds uniquement en JSON.")
+
+
+def _anatomy(items):
+    """[{"partie", "nombre", "ou"}] -> lignes anglaises lisibles (« 3 heads: each on its own neck… »)."""
+    out = []
+    for it in items if isinstance(items, list) else []:
+        if not isinstance(it, dict):
+            continue
+        part, where = _clean(it.get("partie") or it.get("part"), 40), _clean(it.get("ou") or it.get("where"), 160)
+        try:
+            n = int(it.get("nombre", it.get("count")))
+        except (TypeError, ValueError):
+            n = None
+        if part and n is not None and 0 < n <= 100:
+            out.append(f"{n} {part}" + (f": {where}" if where else ""))
+    return out[:10]
 
 
 def brief(description, seed=1):
-    """Ce que la description veut dire pour le dessin : posture, nombre de pattes, description anglaise précise.
+    """Ce que la description veut dire pour le dessin : posture, pattes, anatomie (chaque partie, son nombre, sa
+    place), description anglaise précise.
 
-    Le modèle d'image comprend mieux l'anglais et, surtout, les vues de dos et de profil en ont besoin : sans elle il
-    ne voit que l'image de face et invente des pattes à une créature qui flotte."""
-    prompt = (f"Description : « {description} »\n\nRéponds en JSON avec exactement ces clés :\n"
+    Le modèle d'image comprend mieux l'anglais, dessine mieux les nombres quand on les place (« trois têtes, chacune
+    sur son cou ») et les vues de dos et de profil en ont besoin : sans elle il ne voit que l'image de face."""
+    refs = nb_archetypes.match(description)
+    known = "".join(f"\n- {t}" for _, t in refs)
+    prompt = (f"Description : « {description} »\n"
+              + (f"Référence visuelle fiable de ce qu'elle nomme (à suivre, sauf ce que la description précise "
+                 f"autrement) :{known}\n" if known else "")
+              + "\nRéponds en JSON avec exactement ces clés :\n"
               f"\"posture\" (un seul mot parmi : {', '.join(POSTURES)} ; « flotte » si elle lévite ou flotte dans les airs "
               "sans toucher le sol, « rampe » pour un serpent, un ver ou une limace, « nage » pour un poisson),\n"
               "\"pattes\" (le nombre de pattes ou de jambes qui touchent le sol, 0 si elle n'en a pas ; les tentacules, "
               "bras et ailes ne comptent pas),\n"
-              "\"en\" (la description traduite en anglais, précise et visuelle : forme du corps, posture, nombres exacts "
-              "de chaque partie, couleurs ; 1 à 3 phrases ; rien d'ajouté),\n"
+              "\"silhouette\" (en anglais, quelques mots : ce qu'elle est dans l'ensemble, ex. « a three-headed ghoul "
+              "hound », « a living treasure chest »),\n"
+              "\"anatomie\" (liste de TOUTES les parties visibles qui se comptent : têtes, yeux, bouches, cornes, "
+              "pattes, bras, ailes, queues, tentacules, défenses… Chaque élément : {\"partie\": nom anglais au pluriel "
+              "ou singulier, \"nombre\": entier, \"ou\": en anglais, où elles sont et comment elles sont disposées, "
+              "ex. « each on its own long neck, side by side », « 3 on the middle head and 2 on each side head »} ; "
+              "les nombres de la description sont exacts ; une partie qui va par paire chez l'animal mais qui est "
+              "unique ici est placée (« a single horn in the middle of the forehead »)),\n"
+              "\"en\" (la description complète en anglais, précise et visuelle : forme, posture, parties et leurs "
+              "nombres, couleurs, matières ; 2 à 4 phrases ; rien qui la contredise),\n"
               "\"profil\" (en anglais, une phrase : à quoi ressemble sa silhouette vue de son côté gauche, "
               "y compris ce qu'il y a sous son corps).")
     out = _ask(SYS_BRIEF, prompt, seed, temperature=0.2, keep_alive=0)
@@ -139,12 +176,16 @@ def brief(description, seed=1):
         legs = max(0, min(int(out.get("pattes", 0)), 100))
     except (TypeError, ValueError):
         legs = 0
-    en = _clean(out.get("en"), 600)
+    en = _clean(out.get("en"), 800)
     if not posture or not en:
         raise WriterError("La plume n'a pas compris la description.")
+    ref_posture = next((p for p, _ in refs if p), None)
+    if ref_posture and not nb_archetypes.says_posture(description):  # le tyrannœil flotte, même si la plume hésite
+        posture = ref_posture
     if posture in ("flotte", "rampe", "nage"):
         legs = 0
-    return dict(posture=posture, pattes=legs, en=en, profil=_clean(out.get("profil"), 300))
+    return dict(posture=posture, pattes=legs, en=en, silhouette=_clean(out.get("silhouette"), 120),
+                anatomie=_anatomy(out.get("anatomie")), profil=_clean(out.get("profil"), 300))
 
 
 def lore(name, description, seed=1):

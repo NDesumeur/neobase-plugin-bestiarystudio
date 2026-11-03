@@ -9,6 +9,7 @@ import uuid
 
 from PIL import Image, ImageOps
 
+import nb_archetypes
 import nb_auto
 import nb_comfy as nbc
 import nb_core
@@ -100,6 +101,8 @@ def guess_brief(description):
     """Sans plume (pas d'Ollama) : la posture devinée par mots-clés, la description reste en français."""
     folded = nb_core.fold(description)
     posture = next((p for p, rx in _GUESS if nb_core.re.search(rx, folded)), "")
+    if not posture and not nb_archetypes.says_posture(description):
+        posture = next((p for p, _ in nb_archetypes.match(description) if p), "")
     legs = 0 if posture or not has_legs(description) else counts(description).get("legs", 0)  # 0 : on ne sait pas
     if legs and not posture:
         posture = {2: "deux_jambes", 4: "quatre_pattes"}.get(legs, "plusieurs_pattes")
@@ -111,10 +114,31 @@ def pose_line(brief):
     return " " + POSE[p].format(n=brief.get("pattes") or "many") if p in POSE else ""
 
 
+def anatomy_line(description, brief=None):
+    """Les nombres, placés : « 3 heads: each on its own neck… » (la plume) ou la phrase de comptage (mots-clés)."""
+    parts = (brief or {}).get("anatomie")
+    if parts:
+        return " Exact anatomy, count carefully and draw every part: " + "; ".join(parts) + "."
+    return count_line(description)
+
+
+def reference_line(description):
+    refs = nb_archetypes.match(description)
+    return (" Reference: " + "; ".join(t for _, t in refs) + ".") if refs else ""
+
+
+def describe(description, brief=None):
+    """Ce qu'on dit du sujet au modèle d'image : l'anglais précis d'abord, le français d'origine ensuite."""
+    b = brief or {}
+    if b.get("en"):
+        head = (b["silhouette"] + ". " if b.get("silhouette") else "") + b["en"]
+        return (f"{head}{anatomy_line(description, b)}{reference_line(description)}{pose_line(b)}"
+                f"\n(Original description, in French: {description.strip()})")
+    return f"{description.strip()}{count_line(description)}{reference_line(description)}{pose_line(b)}"
+
+
 def design_prompt(description, brief=None):
-    en = (brief or {}).get("en")
-    text = description.strip() + (f"\n(In English: {en})" if en else "")
-    return f"{text}{count_line(description)}{pose_line(brief)}\n\n{STYLE} {FACING['bas']}"
+    return f"{describe(description, brief)}\n\n{STYLE} {FACING['bas']}"
 
 
 # profil d'une créature à pattes : sans ça le corps se tasse (vache trapue, pattes cachées)
@@ -125,13 +149,12 @@ PROPORTIONS = (" Same proportions as the front view: same head size, same leg le
 
 def view_prompt(direction, legs=False, brief=None, description=""):
     b = brief or {}
-    what = b.get("en") or description.strip()
-    head = f"The creature: {what}{count_line(description)}{pose_line(b)} " if what else ""
+    head = f"The creature: {describe(description, b)}\n" if (b.get("en") or description.strip()) else ""
     side = f" Seen from the side: {b['profil']}" if direction == "gauche" and b.get("profil") else ""
     known = b.get("posture") in POSE
     facing = FACING[direction].replace("{posture}", "" if known else GUESSED_POSTURE)
     walks = legs or not known  # posture inconnue : on garde les pattes dans la liste, comme avant
-    keep = KEEP.format(parts=("legs, " if walks else "") + "eyes, horns, tentacles and wings")
+    keep = KEEP.format(parts="heads, " + ("legs, " if walks else "") + "eyes, horns, tentacles and wings")
     return head + facing + side + (PROPORTIONS if legs and direction == "gauche" else "") + keep
 
 
