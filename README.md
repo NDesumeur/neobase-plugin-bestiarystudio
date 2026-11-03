@@ -30,7 +30,7 @@ ComfyUI démarre tout seul à la première invocation et s'arrête quand tu ferm
 
 ## Combien de temps
 
-Environ 2 à 3 minutes par créature sur une RTX 4060 : le design, le dos, le profil (deux essais chacun, le meilleur est gardé automatiquement), puis la marche.
+Environ 2 à 3 minutes par créature sur une RTX 4060 : le design, puis le dos et le profil (deux essais chacun, le meilleur est gardé automatiquement), puis la marche.
 
 ## Permissions
 
