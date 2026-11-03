@@ -184,12 +184,6 @@ def render(client, model, prompt, seed, refs_img=(), cancel=lambda: False, **kw)
 MODEL = "klein"
 DIRECTIONS = ("bas", "gauche", "droite", "haut")
 TRIES = 2  # candidats par vue ; le meilleur est gardé, les autres restent comme versions
-STEP = {
-    "a": "its left legs step forward while its right legs push back",
-    "b": "its right legs step forward while its left legs push back",
-}
-WALK = ("Show this exact same creature, facing exactly the same direction with the same camera, caught mid-stride "
-        "while walking: {step}. Only the legs move; body, head and everything else stay identical." + KEEP)
 
 
 def _colors(im):
@@ -277,18 +271,84 @@ def generate_view(client, refs, direction, seed, progress=lambda m: None, cancel
     return _best(client, view_prompt(direction, legs), refs, direction, seed, 1, cancel, progress, label)[0]
 
 
+def leg_zone(im):
+    """Hauteur (en px, depuis le haut de l'image) où commencent les pattes : sous le corps, la silhouette se sépare
+    en plusieurs colonnes ou devient nettement plus étroite. Bornée entre 15 % et 45 % du bas de la créature."""
+    a = im.getchannel("A").point(lambda v: 255 if v >= 128 else 0)
+    box = a.getbbox()
+    if not box:
+        return None, None
+    x0, y0, x1, y1 = box
+    h = y1 - y0
+    px = a.load()
+
+    def runs(y):
+        n, inside, width = 0, False, 0
+        for x in range(x0, x1):
+            on = px[x, y] > 0
+            width += on
+            if on and not inside:
+                n += 1
+            inside = on
+        return n, width
+
+    widest = max(runs(y)[1] for y in range(y0, y1, max(1, h // 40)))
+    top = y1 - round(h * .15)
+    for y in range(y1 - round(h * .15), y1 - round(h * .45), -1):  # on remonte tant que ça ressemble à des pattes
+        n, w = runs(y)
+        if n >= 2 or w < widest * .55:
+            top = y
+        else:
+            break
+    return top, box
+
+
+def step_frame(im, direction, phase):
+    """Un pas procédural à partir de la pose de repos : mêmes pixels, seules les pattes bougent.
+
+    face / dos : les pattes d'un côté se lèvent (phase +1 = côté gauche de l'image, -1 = droit).
+    profil (tête à gauche) : pattes avant et arrière se balancent en sens opposé (cisaillement du bas des pattes).
+    """
+    im = im.convert("RGBA")
+    top, box = leg_zone(im)
+    if top is None:
+        return im.copy()
+    x0, y0, x1, y1 = box
+    h, zh = y1 - y0, y1 - top
+    body = im.copy()
+    body.paste((0, 0, 0, 0), (0, top, im.width, im.height))
+    legs = im.copy()
+    legs.paste((0, 0, 0, 0), (0, 0, im.width, top))
+    out = Image.new("RGBA", im.size, (0, 0, 0, 0))
+    mid = (x0 + x1) // 2
+    if direction in ("bas", "haut"):
+        lift = max(2, round(h * .045))
+        for side, (a, b) in ((1, (0, mid)), (-1, (mid, im.width))):
+            part = legs.crop((a, 0, b, im.height))
+            out.alpha_composite(part, (a, -lift if side == phase else 0))
+    else:
+        swing = max(2, round(zh * .32))
+        for front, (a, b) in ((True, (0, mid)), (False, (mid, im.width))):  # tête à gauche : l'avant est à gauche
+            part = legs.crop((a, 0, b, im.height))
+            sign = (-1 if front else 1) * phase
+            sheared = Image.new("RGBA", part.size, (0, 0, 0, 0))
+            for y in range(top, y1):
+                dx = round(sign * swing * (y - top) / max(1, zh))
+                row = part.crop((0, y, part.width, y + 1))
+                sheared.paste(row, (dx, y), row)  # paste accepte un décalage négatif
+            out.alpha_composite(sheared, (a, 0))
+    out.alpha_composite(body)  # le corps passe devant le haut des pattes
+    return out
+
+
 def generate_walk(client, view, direction, description, seed, progress=lambda m: None, cancel=lambda: False):
-    """3 images : pas A, repos, pas B (lecture A, repos, B, repos). droite : miroir de la marche gauche."""
+    """3 images : pas A, repos, pas B (lecture A, repos, B, repos). droite : miroir de la marche gauche.
+
+    Les pas sont calculés depuis la pose de repos (pas redessinés par le modèle) : les pattes restent nettes et la
+    créature identique d'une image à l'autre. Sans pattes (œil, blob, serpent) : rebond."""
     if not has_legs(description):
         return [bob(view, 1), view.copy(), bob(view, -1)]
-    frames = []
-    for k in ("a", "b"):
-        if cancel():
-            raise nbc.ComfyError("annulé")
-        progress(f"Marche {direction} : pas {'1' if k == 'a' else '2'}")
-        frames.append(render(client, MODEL, WALK.format(step=STEP[k]), seed + 50 + ord(k), refs_img=[view],
-                             cancel=cancel, cut=True))
-    return [frames[0], view.copy(), frames[1]]
+    return [step_frame(view, direction, 1), view.copy(), step_frame(view, direction, -1)]
 
 
 def generate_creature(client, description, seed, progress=lambda m: None, cancel=lambda: False):

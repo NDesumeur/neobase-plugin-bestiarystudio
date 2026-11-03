@@ -102,9 +102,17 @@ def main():
         _, c = call(port, "/creature?slug=" + slug)
         assert c["views"]["bas"]["version"] == 4 and c["views"]["haut"]["versions"] == haut + 2, "refaire la face ne suit pas"
 
+        assert c["lore"] and c["lore"]["histoire"], "fiche absente après la création"
+        _, c = call(port, "/lore", {"slug": slug})
+        assert c["lore"]["type"], c["lore"]
+        _, i = call(port, "/inspire", {"theme": "lovecraft"})
+        assert i["description"], i
+
         _, e = call(port, "/export", {"slug": slug})
         meta = json.loads(Path(e["json"]).read_text(encoding="utf-8"))
         assert meta["rows"] == 4 and meta["directions"]["haut"]["row"] == 3 and Path(e["png"]).is_file()
+        assert meta["fiche"]["histoire"] and (Path(e["folder"]) / "portrait.png").is_file()
+        assert Path(e["folder"]).parent == Path(call(port, "/exports")[1]["folder"]), e["folder"]
 
         _, libr = call(port, "/library")
         assert [x["slug"] for x in libr] == [slug] and libr[0]["thumb"]

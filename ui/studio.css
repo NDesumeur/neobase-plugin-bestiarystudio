@@ -159,3 +159,13 @@
 .nbs-sketch img { width: 112px; height: 112px; object-fit: contain; image-rendering: pixelated; }
 .nbs-sketch:hover { box-shadow: 0 0 0 4px var(--ink0), 0 0 0 8px var(--brass); }
 .nbs-sketch .nbs-btn { pointer-events: none; }
+
+/* inspiration et fiche */
+.nbs-themes { gap: 6px; flex-wrap: wrap; }
+.nbs-btn.sm { padding: 2px 10px; font-size: 19px; }
+.nbs-fiche { color: var(--ink0); max-width: 760px; }
+.nbs-fiche p { margin: 6px 0 0; line-height: 1.35; }
+.nbs-fiche-head { display: flex; align-items: center; gap: 10px; font-size: 22px; }
+.nbs-fiche-sub { color: var(--parch3); }
+.nbs-type { background: var(--violet); color: var(--white); padding: 0 8px; text-transform: capitalize; box-shadow: 2px 2px 0 var(--ink0); font-size: 16px; }
+.nbs-story { font-style: italic; }

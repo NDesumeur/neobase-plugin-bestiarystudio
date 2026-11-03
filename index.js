@@ -31,6 +31,19 @@ const HTML = `<link rel="stylesheet" href="${U}ui/studio.css">
     <section class="nbs-page on" id="p-creer">
       <div class="nbs-cols">
         <div class="grow">
+          <div class="nbs-title">Inspiration</div>
+          <div class="nbs-row nbs-themes" id="themes">
+            <button class="nbs-btn dark sm on" data-t="melange">Mélange</button>
+            <button class="nbs-btn dark sm" data-t="lovecraft">Lovecraft</button>
+            <button class="nbs-btn dark sm" data-t="animaux">Animaux</button>
+            <button class="nbs-btn dark sm" data-t="monstres">Monstres</button>
+            <button class="nbs-btn dark sm" data-t="folklore">Folklore</button>
+          </div>
+          <div class="nbs-row" style="margin-top:8px">
+            <button class="nbs-btn" id="inspire">${ic('etoile')}Inspire-moi</button>
+            <span class="nbs-hint" id="inspireMsg">Une idée de créature, écrite clairement pour le dessin.</span>
+          </div>
+          <div class="nbs-sep"></div>
           <div class="nbs-title">Nom</div>
           <div class="nbs-parch"><input type="text" id="name" maxlength="60" placeholder="Ophidrache, Chien de feu…" spellcheck="false"></div>
           <div class="nbs-sep"></div>
@@ -69,6 +82,13 @@ const HTML = `<link rel="stylesheet" href="${U}ui/studio.css">
       <div class="nbs-row">
         <button class="nbs-btn dark" id="toLab">${ic('oeil')}Voir en jeu</button>
         <span class="nbs-hint" id="dirHint">Clique une image puis ◀ ▶ pour changer sa version.</span>
+      </div>
+      <div class="nbs-sep"></div>
+      <div class="nbs-title">Fiche du bestiaire</div>
+      <div class="nbs-parch nbs-fiche" id="fiche"></div>
+      <div class="nbs-row" style="margin-top:8px">
+        <button class="nbs-btn dark" id="relore">${ic('refaire')}Réécrire la fiche</button>
+        <span class="nbs-hint" id="loreMsg"></span>
       </div>
     </section>
 
@@ -123,6 +143,7 @@ const HTML = `<link rel="stylesheet" href="${U}ui/studio.css">
     <section class="nbs-page" id="p-lib">
       <div class="nbs-row" style="margin-bottom:12px">
         <div class="nbs-parch" style="flex:1"><input type="text" id="q" placeholder="Chercher une créature…" spellcheck="false"></div>
+        <button class="nbs-btn dark" id="openExports" title="Les créatures exportées, prêtes pour le bestiaire">${ic('dossier')}Exports</button>
       </div>
       <div class="nbs-lib" id="lib"></div>
     </section>
@@ -230,13 +251,48 @@ export default async function (ctx) {
   $('#cancel').onclick = () => post('/cancel');
   $('#stages').innerHTML = DIRS.map((d, i) => `<div class="nbs-stage${i % 3 ? ' path' : ''}"><img class="w" data-d="${d}" alt=""><span class="tag">${ARROW[d]} ${d}</span></div>`).join('');
 
+  // ------------------------------------------------------------ inspiration
+  S.theme = 'melange';
+  $$('#themes [data-t]').forEach(b => b.onclick = () => {
+    S.theme = b.dataset.t;
+    $$('#themes [data-t]').forEach(x => x.classList.toggle('on', x === b));
+  });
+  $('#inspire').onclick = async () => {
+    const b = $('#inspire'), msg = $('#inspireMsg');
+    b.disabled = true; msg.textContent = 'La plume réfléchit… (une minute la première fois)';
+    try {
+      const i = await post('/inspire', { theme: S.theme });
+      if (i.name) $('#name').value = i.name;
+      $('#desc').value = i.description;
+      msg.textContent = 'Idée prête : retouche-la si tu veux, puis Invoquer.';
+    } catch (e) { msg.textContent = e.message; }
+    b.disabled = false;
+  };
+
+  // ------------------------------------------------------------ fiche
+  function renderFiche() {
+    const f = S.cr?.lore, box = $('#fiche');
+    if (!S.cr) { box.innerHTML = '<div class="nbs-hint">Aucune créature ouverte.</div>'; return; }
+    box.innerHTML = f ? `<div class="nbs-fiche-head"><b>${esc(S.cr.name)}</b><span class="nbs-type">${esc(f.type)}</span></div>
+      <div class="nbs-fiche-sub">${esc(f.espece)} · ${esc(f.taille)} · ${esc(f.poids)}</div>
+      <p><i>Habitat.</i> ${esc(f.habitat)}</p><p>${esc(f.description)}</p><p class="nbs-story">${esc(f.histoire)}</p>`
+      : '<div class="nbs-hint">Pas encore de fiche : clique « Réécrire la fiche ».</div>';
+  }
+  $('#relore').onclick = async () => {
+    if (!S.cr) return;
+    const b = $('#relore'); b.disabled = true; $('#loreMsg').textContent = 'La plume écrit…';
+    try { refresh(await post('/lore', { slug: S.cr.slug })); $('#loreMsg').textContent = ''; } catch (e) { $('#loreMsg').textContent = e.message; }
+    b.disabled = false;
+  };
+  $('#openExports').onclick = async () => { try { call('openFolder', (await get('/exports')).folder); } catch (e) { say(e.message, true); } };
+
   // ------------------------------------------------------------ créature ouverte
   async function open(slug) {
     S.cr = await get('/creature?slug=' + encodeURIComponent(slug));
     S.stamp = Date.now();
     $('#liveTitle').textContent = S.cr.name;
     $('#dirTitle').textContent = S.cr.name + ' · 4 directions × 3 pas · 64×64';
-    renderSheet(); renderLab(); renderSketches();
+    renderSheet(); renderLab(); renderSketches(); renderFiche();
     if (S.tab === 'lab') loadFrame();
   }
   function renderSketches() {  // esquisses pas encore choisies : on les montre, un clic lance le reste
@@ -250,7 +306,7 @@ export default async function (ctx) {
       runJob(() => post('/continue', { slug: S.cr.slug, index: +b.dataset.i }));
     });
   }
-  const refresh = cr => { S.cr = cr; S.stamp = Date.now(); renderSheet(); renderLab(); if (S.tab === 'lab') loadFrame(); };
+  const refresh = cr => { S.cr = cr; S.stamp = Date.now(); renderSheet(); renderLab(); renderFiche(); if (S.tab === 'lab') loadFrame(); };
 
   // ------------------------------------------------------------ directions
   function renderSheet() {
@@ -331,7 +387,7 @@ export default async function (ctx) {
     if (!S.cr) return;
     try {
       const r = await post('/export', { slug: S.cr.slug });
-      $('#expMsg').innerHTML = `Exporté : ${esc(r.png.split(/[\\/]/).pop())} + JSON · <a href="#" id="openf">ouvrir le dossier</a>`;
+      $('#expMsg').innerHTML = `Exporté dans Exports : planche, JSON, fiche et portrait · <a href="#" id="openf">ouvrir le dossier</a>`;
       $('#openf').onclick = e => { e.preventDefault(); call('openFolder', r.folder); };
     } catch (e) { $('#expMsg').textContent = e.message; }
   };

@@ -47,3 +47,17 @@ def generate_walk(client, view, direction, description, seed, progress=lambda m:
     up = Image.new("RGBA", view.size, (0, 0, 0, 0))
     up.paste(view, (0, -8), view)
     return [up, view.copy(), up.copy()]
+
+
+# plume factice (mêmes fonctions que nb_writer)
+def model():
+    return "factice"
+
+
+def idea(theme="melange", seed=None):
+    return dict(name="Crapaud test", description="un crapaud violet à quatre pattes avec trois yeux rouges", theme=theme)
+
+
+def lore(name, description, seed=1):
+    return dict(type="poison", espece="la créature Test", taille="1 m", poids="10 kg", habitat="Les marais.",
+                description=description, histoire=f"On raconte que {name} existe.")

@@ -13,6 +13,7 @@ import os
 import shutil
 import sys
 import threading
+import urllib.request
 import time
 import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -102,9 +103,11 @@ class Studio:
         self.fake = fake
         if fake:
             import nb_engine_fake as eng
+            writer = eng
         else:
             import nb_engine as eng
-        self.eng = eng
+            import nb_writer as writer
+        self.eng, self.writer = eng, writer
 
     # ---------------------------------------------------------------- état
     def client(self):
@@ -114,13 +117,13 @@ class Studio:
 
     def status(self):
         if self.fake:
-            return dict(comfy="prêt", comfy_root=True, missing=[], model="factice")
+            return dict(comfy="prêt", comfy_root=True, missing=[], model="factice", writer="factice")
         import install_models
         up = self.manager.client.is_up()
         found = bool(self.comfy_root and (self.comfy_root / "ComfyUI" / "main.py").is_file())
         missing = [dict(name=n, gb=gb) for _f, n, _r, gb in install_models.missing(self.comfy_root)] if found else []
         return dict(comfy="prêt" if up else ("arrêté" if found else "introuvable"), comfy_root=found,
-                    missing=missing, model="FLUX.2 klein")
+                    missing=missing, model="FLUX.2 klein", writer=self.writer.model())
 
     def install_models(self):
         import install_models
@@ -183,11 +186,42 @@ class Studio:
             self._walk(c, slug, d, progress, cancel)
         self._mirror_walk(slug)
         self.build_sprites(slug)
+        progress("Écriture de la fiche")
+        try:
+            self.write_lore(slug)
+        except Exception as exc:  # pas d'Ollama : la créature est faite quand même, la fiche s'écrira plus tard
+            print("fiche non écrite :", exc)
         return slug
 
+    def _free_gpu(self):
+        """Le modèle d'image et celui de texte se partagent la carte : on demande à ComfyUI de libérer la mémoire."""
+        if self.fake or not self.manager.client.is_up():
+            return
+        try:
+            req = urllib.request.Request(self.manager.client.url + "/free", data=b'{"unload_models":true,"free_memory":true}',
+                                         headers={"Content-Type": "application/json"})
+            urllib.request.urlopen(req, timeout=10).read()
+        except Exception:
+            pass
+
+    def inspire(self, theme, seed=None):
+        if not self.jobs.get()["running"]:
+            self._free_gpu()
+        return self.writer.idea(theme or "melange", seed)
+
+    def write_lore(self, slug):
+        rec = self.lib.load(slug)
+        if rec is None:
+            raise ValueError("Créature introuvable.")
+        if not self.jobs.get()["running"] or self.jobs.get()["slug"] == slug:
+            self._free_gpu()
+        rec = self.lib.load(slug)
+        rec["lore"] = self.writer.lore(rec["name"], rec.get("description", ""), int(time.time()) % 100000)
+        self.lib.save(rec)
+        return self.creature(slug)
+
     def _rest_steps(self, slug):
-        legs = self.eng.has_legs(self.lib.load(slug)["description"])
-        return 2 * self.eng.TRIES + (6 if legs else 0)
+        return 2 * self.eng.TRIES + 1  # la marche est calculée (pas d'image à générer) ; +1 : la fiche
 
     def finish(self, slug, index):
         """Le design choisi parmi les esquisses devient la créature : directions et marche."""
@@ -261,7 +295,7 @@ class Studio:
                 self._mirror_walk(slug)
             self.build_sprites(slug)
             return slug
-        total = 1 + (self._rest_steps(slug) if d == "bas" else (2 if legs else 0))
+        total = 1 + (self._rest_steps(slug) if d == "bas" else 0)
         return self.jobs.start("redo", run, total, slug)
 
     def choose(self, slug, key, delta=None, index=None):
@@ -292,7 +326,7 @@ class Studio:
                     lab=rec.get("lab", dict(LAB_DEFAULTS)), views=views, sprites=sprites,
                     palette=rec.get("sprite_palette", []), updated=rec.get("updated", 0),
                     sheet="sprites/sheet.png" if (sd / "sheet.png").is_file() else None,
-                    designs=rec.get("views", {}).get("bas", {}).get("files", []),
+                    designs=rec.get("views", {}).get("bas", {}).get("files", []), lore=rec.get("lore"),
                     pending=not rec.get("views", {}).get("haut"))  # esquisses pas encore choisies
 
     def library(self):
@@ -395,7 +429,7 @@ class Studio:
     def export(self, slug, dest=None):
         rec = self.lib.load(slug)
         sheet = self._sheet(slug)
-        out = Path(dest) if dest else self.lib.dir(slug) / "export"
+        out = Path(dest) if dest else self.exports_dir() / rec["slug"]
         out.mkdir(parents=True, exist_ok=True)
         base = rec["slug"]
         sheet.save(out / f"{base}.png")
@@ -405,10 +439,20 @@ class Studio:
             animation=["pas1", "repos", "pas2", "repos"],
             directions={d: dict(row=r, frames={f: dict(x=c * CELL, y=r * CELL) for c, f in enumerate(FRAMES)})
                         for r, d in enumerate(DIRS)},
-            description=rec.get("description", ""), seed=rec.get("seed"),
+            description=rec.get("description", ""), seed=rec.get("seed"), fiche=rec.get("lore"),
+            portrait="portrait.png",
         )
+        design = self._active(slug, "bas")
+        if design is not None:  # le design en grand (pour une carte de bestiaire)
+            box = design.getbbox()
+            (design.crop(box) if box else design).save(out / "portrait.png")
         (out / f"{base}.json").write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
         return dict(folder=str(out), png=str(out / f"{base}.png"), json=str(out / f"{base}.json"))
+
+    def exports_dir(self):
+        d = self.lib.root / "Exports"
+        d.mkdir(exist_ok=True)
+        return d
 
     def shutdown(self):
         """Fermeture du plugin : arrête le ComfyUI que ce service a lancé (pas celui de l'utilisateur), puis quitte."""
@@ -450,12 +494,15 @@ def make_handler(studio, token):
         "/job": lambda q: studio.jobs.get(),
         "/library": lambda q: studio.library(),
         "/creature": lambda q: studio.creature(q["slug"]),
+        "/exports": lambda q: dict(folder=str(studio.exports_dir())),
     }
     routes_post = {
         "/create": lambda b: dict(zip(("job", "slug"), studio.create(b.get("name"), b.get("description"), b.get("seed")))),
         "/cancel": lambda b: studio.jobs.cancel() or dict(ok=True),
         "/redo": lambda b: dict(job=studio.redo(b["slug"], b["dir"])),
         "/continue": lambda b: dict(job=studio.finish(b["slug"], b["index"])),
+        "/inspire": lambda b: studio.inspire(b.get("theme"), b.get("seed")),
+        "/lore": lambda b: studio.write_lore(b["slug"]),
         "/choose": lambda b: studio.choose(b["slug"], b["key"], b.get("delta"), b.get("index")),
         "/lab": lambda b: studio.set_lab(b["slug"], b.get("opts", {})),
         "/rebuild": lambda b: studio.build_sprites(b["slug"]),

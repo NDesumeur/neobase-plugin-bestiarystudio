@@ -1,7 +1,7 @@
 {
   "id": "neobase.bestiarystudio",
   "name": "NeoBestiary Studio",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "author": "NDesumeur",
   "description": "Décris une créature en français, elle sort en sprite pixel art 64×64 dans les 4 directions avec sa marche, prête pour ton jeu. Dessin par IA en local (ComfyUI, carte NVIDIA 8 Go).",
   "icon": "icon.png",
