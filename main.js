@@ -14,11 +14,12 @@ const GUESSES = [  // où ComfyUI portable est souvent posé
   path.join(app.getPath('home'), 'ComfyUI_windows_portable'), path.join(app.getPath('desktop'), 'ComfyUI_windows_portable'),
 ];
 const isComfy = d => !!d && fs.existsSync(path.join(d, 'python_embeded', 'python.exe')) && fs.existsSync(path.join(d, 'ComfyUI', 'main.py'));
+const TYPES = { '.css': 'text/css; charset=utf-8', '.woff': 'font/woff', '.png': 'image/png', '.json': 'application/json' };
 const inside = (base, rel) => { const p = path.resolve(base, rel); return p.startsWith(path.resolve(base) + path.sep) ? p : null; };  // jamais en dehors du dossier
 
 module.exports = ({ ipcMain, protocol, serveFile, readDoc, writeDoc }) => {
   let srv = null;  // { proc, port, token, ready }
-  const settings = async () => ({ comfyRoot: '', comfyUrl: 'http://127.0.0.1:8188', ...(await readDoc('settings').catch(() => null) || {}) });
+  const settings = async () => ({ comfyRoot: '', comfyUrl: 'http://127.0.0.1:8188', ...(readDoc('settings') || {}) });  // readDoc de NeoBase est synchrone, null si absent
 
   async function comfyRoot() {
     const s = await settings();
@@ -87,7 +88,7 @@ module.exports = ({ ipcMain, protocol, serveFile, readDoc, writeDoc }) => {
     const u = new URL(req.url), [, kind, ...rest] = u.pathname.split('/'), rel = decodeURIComponent(rest.join('/'));
     const file = kind === 'ui' ? inside(UI, rel) : kind === 'lib' ? inside(path.join(LIBRARY(), 'creatures'), rel) : null;
     if (!file || !fs.existsSync(file)) return new Response('', { status: 404 });
-    return serveFile(file, req);
+    return serveFile(file, req, TYPES[path.extname(file).toLowerCase()]);
   });
 
   return () => {  // plugin désactivé ou NeoBase fermé : le moteur arrête le ComfyUI qu'il a lancé, puis s'en va
