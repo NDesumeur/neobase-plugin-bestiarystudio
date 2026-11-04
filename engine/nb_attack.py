@@ -7,6 +7,7 @@ dessiné au pixel aux couleurs de l'élément, avec un décalage par rapport à 
 par-dessus, devant la créature (le JSON d'export donne ces décalages).
 """
 import math
+import random
 
 from PIL import Image, ImageChops, ImageDraw
 
@@ -15,6 +16,12 @@ FRAMES = 4
 TIMING = (110, 80, 130, 120)  # ms par image : élan, frappe, impact, retour
 FORWARD = {"bas": (0, 1), "haut": (0, -1), "gauche": (-1, 0), "droite": (1, 0)}
 LEAN = (-1, 2, 3, 1)  # déplacement du haut du corps vers l'avant (px)
+# le geste du corps selon l'attaque : élan vers l'avant (px), ou pulsation sur place (échelle) pour les attaques autour d'elle
+LEANS = {"charge": (-2, 4, 6, 1), "corne": (-3, 3, 5, 1), "morsure": (-1, 3, 3, 0), "dard": (-2, 4, 2, 0),
+         "etreinte": (-1, 2, 2, 2), "fouet": (1, 2, 1, 0), "projectile": (-1, 1, -1, 0), "souffle": (-2, 1, 1, 0),
+         "rayon": (-1, 0, -1, 0), "cri": (0, -1, -2, 0), "rafale": (-1, 2, 0, 0), "pluie": (0, -2, -1, 0)}
+PULSE = {"onde": (1, .9, 1.06, 1), "explosion": (1, .86, 1.08, 1), "soin": (1, 1.04, 1.06, 1), "renfort": (1, .94, 1.08, 1.03)}
+SELF = {"onde", "explosion", "soin", "renfort"}  # effet centré sur la créature
 
 # élément -> (contour, moyen, clair, cœur)
 PALETTE = {
@@ -45,16 +52,31 @@ def _split(im):
     return upper, legs
 
 
-def body_frames(rest, direction, legs=True):
-    """4 images du corps : le haut bascule vers l'avant (élan en arrière d'abord), sans sortir de la case."""
+def _pulse(rest, k):
+    box = rest.getbbox()
+    if not box or k == 1:
+        return rest.copy()
+    part = rest.crop(box)
+    nw, nh = max(1, round(part.width * (2 - k) ** .5)), max(1, round(part.height * k))
+    part = part.resize((nw, nh), Image.Resampling.NEAREST)
+    out = Image.new("RGBA", rest.size)
+    out.paste(part, ((box[0] + box[2]) // 2 - nw // 2, box[3] - nh), part)
+    return out
+
+
+def body_frames(rest, direction, legs=True, genre=""):
+    """4 images du corps : le haut bascule vers l'avant (élan en arrière d'abord), sans sortir de la case ; pour une
+    attaque autour d'elle, la créature se tasse puis se gonfle."""
     rest = rest.convert("RGBA")
+    if genre in PULSE:
+        return [_pulse(rest, k) for k in PULSE[genre]]
     upper, feet = _split(rest) if legs else (rest.copy(), Image.new("RGBA", rest.size))
     box = upper.getbbox() or (0, 0, CELL, CELL)
     fx, fy = FORWARD[direction]
     room_fwd = {(0, 1): CELL - box[3], (0, -1): box[1], (-1, 0): box[0], (1, 0): CELL - box[2]}[(fx, fy)]
     room_back = {(0, 1): box[1], (0, -1): CELL - box[3], (-1, 0): CELL - box[2], (1, 0): box[0]}[(fx, fy)]
     out = []
-    for lean in LEAN:
+    for lean in LEANS.get(genre, LEAN):
         if not legs:  # sans pattes, le corps entier avance : il ne doit pas sortir de la case
             lean = max(-room_back, min(lean, room_fwd))
         frame = Image.new("RGBA", rest.size)
@@ -123,6 +145,55 @@ def _star(d, cx, cy, r, c1, c2):
         x, y = cx + rr * math.cos(math.radians(ang)), cy + rr * math.sin(math.radians(ang))
         d.line((cx, cy, round(x), round(y)), fill=c1, width=2)
     d.ellipse((cx - 2, cy - 2, cx + 2, cy + 2), fill=c2)
+
+
+def _flame(d, x, y, c1, c2, r):
+    d.polygon([(x - r, y + r), (x + r, y + r), (x, y - 2 * r)], fill=c1)
+    d.polygon([(x - r // 2, y + r), (x + r // 2, y + r), (x, y - r)], fill=c2)
+
+
+def _decor(im, element, seed):
+    """Motifs de l'élément semés sur l'effet : flammèches, cristaux, bulles, éclairs, feuilles, gouttes…"""
+    a = im.getchannel("A")
+    pts = [(x, y) for y in range(0, CELL, 3) for x in range(0, CELL, 3) if a.getpixel((x, y))]
+    if not pts:
+        return im
+    dark, mid, light, core = (_rgb(c) for c in PALETTE.get(element, PALETTE["esprit"]))
+    r = random.Random(seed)
+    d = ImageDraw.Draw(im)
+    for x, y in r.sample(pts, min(len(pts), 6)):
+        if element == "feu":
+            _flame(d, x, y, light, core, 2)
+        elif element == "glace":
+            d.polygon([(x, y - 4), (x + 2, y), (x, y + 4), (x - 2, y)], fill=core)
+            d.line((x - 3, y, x + 3, y), fill=light)
+        elif element == "poison":
+            d.ellipse((x - 2, y - 2, x + 2, y + 2), outline=light)
+            d.point((x - 1, y - 1), fill=core)
+        elif element == "foudre":
+            d.line([(x - 3, y - 4), (x + 1, y - 1), (x - 1, y + 1), (x + 3, y + 4)], fill=core, width=1)
+        elif element == "plante":
+            d.ellipse((x - 3, y - 1, x + 3, y + 2), fill=light)
+            d.line((x - 3, y + 1, x + 3, y), fill=mid)
+        elif element == "eau":
+            d.ellipse((x - 2, y - 1, x + 2, y + 3), fill=light)
+            d.polygon([(x - 1, y), (x + 1, y), (x, y - 3)], fill=light)
+        elif element == "vent":
+            d.arc((x - 4, y - 3, x + 4, y + 3), 180, 360, fill=core)
+        elif element == "roche":
+            d.rectangle((x - 2, y - 2, x + 1, y + 1), fill=mid, outline=dark)
+        elif element == "lumière":
+            d.line((x - 3, y, x + 3, y), fill=core)
+            d.line((x, y - 3, x, y + 3), fill=core)
+        elif element == "ombre":
+            d.ellipse((x - 2, y - 3, x + 2, y + 1), fill=dark)
+            d.point((x, y - 1), fill=light)
+        elif element == "esprit":
+            d.ellipse((x - 3, y - 3, x + 3, y + 3), outline=core)
+        elif element == "acier":
+            d.line((x - 3, y + 3, x + 3, y - 3), fill=core, width=1)
+            d.point((x + 3, y - 3), fill=light)
+    return im
 
 
 def _effect(genre, element, i):
@@ -207,10 +278,107 @@ def _effect(genre, element, i):
             d.rectangle((ax - w // 2 - 1, ay, ax + w // 2 + 1, end), fill=mid)
             d.rectangle((ax - w // 2, ay, ax + w // 2, end), fill=light)
             d.line((ax, ay, ax, end), fill=core, width=1)
+    elif genre == "fouet":  # la queue balaie devant elle, d'un côté à l'autre
+        if i == 0:
+            return None
+        a0, a1 = ((-10, 60), (-20, 200), (120, 200))[i - 1]
+        pts = _arc(ax, ay + 4, 24, a0, a1, 16)
+        _thick(d, pts, light if i < 3 else mid, 4 if i == 2 else 2)
+        _thick(d, pts, core, 1)
+        if i == 2:
+            _star(d, *pts[len(pts) // 2], 7, mid, core)
+        im = _fade(im, .5) if i == 3 else im
+    elif genre == "corne":  # une pointe qui jaillit
+        if i == 0:
+            d.point((ax, ay + 2), fill=core)
+        else:
+            ln = (14, 30, 30)[i - 1]
+            d.polygon([(ax - 5, ay), (ax + 5, ay), (ax, ay + ln)], fill=light)
+            d.line((ax, ay + 2, ax, ay + ln - 2), fill=core)
+            if i >= 2:
+                _star(d, ax, ay + ln, (10, 14)[i - 2], mid, core)
+            im = _fade(im, .5) if i == 3 else im
+    elif genre == "dard":  # un aiguillon qui pique, puis des gouttes de venin
+        if i == 0:
+            return None
+        ln = (18, 34, 34)[i - 1]
+        if i < 3:
+            d.line((ax, ay, ax, ay + ln), fill=light, width=2)
+            d.polygon([(ax - 2, ay + ln - 3), (ax + 2, ay + ln - 3), (ax, ay + ln + 3)], fill=core)
+        for k in range(i - 1):
+            for dx in (-6, 5):
+                y = ay + ln + 4 + 6 * k
+                d.ellipse((ax + dx - 2, y - 2, ax + dx + 2, y + 3), fill=mid)
+        im = _fade(im, .6) if i == 3 else im
+    elif genre == "etreinte":  # des tentacules qui s'enroulent autour de la cible
+        if i == 0:
+            return None
+        for sign in (-1, 1):
+            pts = _arc(ax + sign * 10, ay + 4, 14, -90 if sign > 0 else 90, 90 if sign > 0 else 270, 10)
+            pts = [(x, y + 6 * (i - 1)) for x, y in pts]
+            _thick(d, pts, light, 3)
+        if i >= 2:
+            for k in range(3):
+                y = ay + 22 + 6 * k
+                d.ellipse((ax - 12 + 2 * (i - 2), y - 3, ax + 12 - 2 * (i - 2), y + 3), outline=core, width=2)
+        im = _fade(im, .5) if i == 3 else im
+    elif genre == "cri":  # des ondes sonores en arcs qui avancent
+        for k in range(i + 1):
+            r = 8 + 12 * k + 4 * i
+            d.arc((ax - r, ay - r, ax + r, ay + r), 40, 140, fill=light if k == i else mid, width=2)
+        im = _fade(im, .5) if i == 3 else im
+    elif genre == "rafale":  # des traits de vent qui filent devant
+        if i == 0:
+            return None
+        for k, x in enumerate((-12, -4, 4, 12)):
+            y0 = ay + 4 + 10 * (i - 1) + (k % 2) * 4
+            d.line((ax + x, y0, ax + x + (k - 1.5) * 2, y0 + 18), fill=light if k % 2 else core, width=1)
+            d.arc((ax + x - 3, y0 + 16, ax + x + 3, y0 + 22), 0, 180, fill=light)
+        im = _fade(im, .5) if i == 3 else im
+    elif genre == "pluie":  # des projectiles tombent du ciel sur la zone devant elle
+        if i == 0:
+            return None
+        r = random.Random(7)
+        for k in range(12):
+            x, y = r.randint(8, 56), r.randint(20, 60)
+            if i == 1 and y > 40:
+                continue
+            if i < 3:
+                d.line((x + 2, y - 6, x, y), fill=light, width=1)
+                d.ellipse((x - 2, y - 2, x + 2, y + 2), fill=core)
+            else:
+                d.arc((x - 4, y - 1, x + 4, y + 3), 180, 360, fill=mid)
+        im = _fade(im, .6) if i == 3 else im
+    elif genre == "explosion":  # une boule qui éclate autour d'elle : ancre au centre
+        r = (6, 14, 26, 30)[i]
+        d.ellipse((32 - r, 32 - r, 32 + r, 32 + r), fill=light if i < 3 else None, outline=mid, width=2)
+        if i in (1, 2):
+            d.ellipse((32 - r // 2, 32 - r // 2, 32 + r // 2, 32 + r // 2), fill=core)
+            _star(d, 32, 32, r + 4, mid, core)
+        im = _fade(im, .5) if i == 3 else im
+    elif genre == "soin":  # des croix lumineuses qui montent autour d'elle
+        if i == 0:
+            return None
+        for k, (x, y) in enumerate(((16, 44), (46, 40), (28, 30), (40, 52))):
+            y -= 8 * i - 4 * (k % 2)
+            d.line((x - 3, y, x + 3, y), fill=core, width=2)
+            d.line((x, y - 3, x, y + 3), fill=core, width=2)
+        im = _fade(im, .5) if i == 3 else im
+    elif genre == "renfort":  # une aura et des flèches qui montent
+        if i == 0:
+            return None
+        d.ellipse((10, 34 - 2 * i, 54, 58 - 2 * i), outline=light, width=2)
+        for x in (18, 32, 46):
+            y = 40 - 6 * i + (x % 3)
+            d.polygon([(x - 3, y), (x + 3, y), (x, y - 5)], fill=core)
+            d.line((x, y, x, y + 5), fill=core)
+        im = _fade(im, .5) if i == 3 else im
     else:
         return None
     if not im.getbbox():
         return None
+    if element in PALETTE and genre not in ("soin", "renfort"):
+        im = _decor(im, element, hash((genre, element, i)) & 0xffff)
     return _outline(im, dark)
 
 
@@ -223,7 +391,7 @@ def _orient(im, direction):
 
 
 def _anchor(direction, genre):
-    if genre == "onde":
+    if genre in SELF:
         return (32, 32)
     ax, ay = ANCHOR
     return {"bas": (ax, ay), "haut": (CELL - 1 - ax, CELL - 1 - ay), "gauche": (CELL - 1 - ay, ax),
@@ -233,8 +401,8 @@ def _anchor(direction, genre):
 def attack(rest, direction, genre, element, legs=True):
     """[{"body": 64x64, "effect": 64x64 ou None, "offset": (dx, dy)}] x 4 : offset = position de la case d'effet
     par rapport à la case du corps (coin haut-gauche)."""
-    bodies = body_frames(rest, direction, legs)
-    if genre == "onde":
+    bodies = body_frames(rest, direction, legs, genre)
+    if genre in SELF:
         bx0, by0, bx1, by1 = rest.getbbox() or (0, 0, CELL, CELL)
         origin = ((bx0 + bx1) // 2, (by0 + by1) // 2)
     else:
@@ -243,10 +411,10 @@ def attack(rest, direction, genre, element, legs=True):
     fx, fy = FORWARD[direction]
     out = []
     for i in range(FRAMES):
-        lean = LEAN[i] if genre != "onde" else 0
+        lean = 0 if genre in SELF else LEANS.get(genre, LEAN)[i]
         off = (origin[0] - ax + fx * lean, origin[1] - ay + fy * lean)
         fx_im = _effect(genre, element, i)
-        out.append(dict(body=bodies[i], effect=fx_im if genre == "onde" else _orient(fx_im, direction), offset=off))
+        out.append(dict(body=bodies[i], effect=fx_im if genre in SELF else _orient(fx_im, direction), offset=off))
     return out
 
 
@@ -264,11 +432,12 @@ if __name__ == "__main__":  # auto-test : une créature ronde, chaque genre, cha
     import sys
     rest = Image.new("RGBA", (CELL, CELL))
     ImageDraw.Draw(rest).ellipse((14, 20, 50, 62), fill=(120, 80, 160, 255), outline=(10, 10, 20, 255), width=2)
-    genres = ("griffe", "morsure", "charge", "projectile", "souffle", "onde", "rayon")
+    import nb_stats
+    genres = nb_stats.GENRES
     rows = []
-    for g in genres:
+    for n, g in enumerate(genres):
         for d in ("bas", "gauche", "haut"):
-            fr = attack(rest, d, g, "feu", legs=False)
+            fr = attack(rest, d, g, list(PALETTE)[n % len(PALETTE)], legs=False)
             assert len(fr) == FRAMES and all(f["body"].size == (CELL, CELL) for f in fr)
             assert any(f["effect"] is not None for f in fr), (g, d)
             rows.append([compose(f) for f in fr])

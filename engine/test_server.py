@@ -107,7 +107,18 @@ def main():
         _, c = call(port, "/lore", {"slug": slug})
         assert c["lore"]["type"], c["lore"]
         k = c["lore"]["combat"]
-        assert k["rarete"] and sum(k["stats"].values()) > 100 and len(k["attaques"]) == 2 and k["faiblesses"], k
+        R = ["commun", "peu commun", "rare", "épique", "légendaire"]
+        assert k["rarete"] and sum(k["stats"].values()) > 100 and k["faiblesses"], k
+        assert len(k["attaques"]) == (2, 3, 3, 4, 4)[R.index(k["rarete"])], k  # 2 à 4 attaques selon la rareté
+        assert len({a["genre"] for a in k["attaques"]}) == len(k["attaques"]), k  # jamais deux fois le même geste
+        # rareté choisie à la main : verrouillée, 4 attaques pour une légendaire ; puis de nouveau calculée
+        _, c = call(port, "/rarity", {"slug": slug, "rarete": "légendaire"})
+        kk = c["lore"]["combat"]
+        assert kk["rarete"] == "légendaire" and kk["rarete_fixe"] and len(kk["attaques"]) == 4, kk
+        assert any(a.get("effet", {}).get("soin") for a in kk["attaques"]) and set(c["attack_fx"]) == {"1", "2", "3", "4"}
+        assert call(port, "/rarity", {"slug": slug, "rarete": "mythique"})[0] == 400
+        _, c = call(port, "/rarity", {"slug": slug, "rarete": None})
+        assert c["lore"]["combat"]["rarete"] == k["rarete"] and not c["lore"]["combat"]["rarete_fixe"]
         assert set(c["attack_fx"]["2"]) == {"bas", "haut", "gauche", "droite"}, c["attack_fx"]
         n = c["views"]["gauche"]["versions"]
         assert call(port, "/edit", {"slug": slug, "key": "gauche", "instruction": ""})[0] == 400, "retouche vide acceptée"
@@ -123,6 +134,35 @@ def main():
         assert Image.open(io.BytesIO(png)).size == (256, 256)
         _, png = call(port, f"/file?slug={slug}&path=sprites/ko.png", raw=True)
         assert Image.open(io.BytesIO(png)).size == (256, 256)  # 4 images x 4 directions
+        assert c["illustration"] and c["illustration_version"][1] % 3 == 0 and c["hd"]["illustration"], c["illustration_version"]
+        _, png = call(port, f"/file?slug={slug}&path=sprites/illustration.png", raw=True)
+        assert Image.open(io.BytesIO(png)).size == (256, 256)
+        ni = c["illustration_version"][1]
+        assert call(port, "/illustration", {"slug": slug})[0] == 200
+        wait_job(port)
+        _, c = call(port, "/creature?slug=" + slug)
+        assert c["illustration_version"] == [ni + 3, ni + 3], c["illustration_version"]
+        _, png = call(port, f"/file?slug={slug}&path=" + c["hd"]["illustration"], raw=True)
+        hd = Image.open(io.BytesIO(png))
+        mask = Image.new("RGB", hd.size)
+        mask.paste((255, 0, 0), (0, 0, hd.width // 2, hd.height))  # rouge : la moitié gauche est effacée
+        buf = io.BytesIO()
+        mask.save(buf, "PNG")
+        b64 = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
+        assert call(port, "/cutout", {"slug": slug, "key": "sheet", "mask": b64})[0] == 400
+        _, c = call(port, "/cutout", {"slug": slug, "key": "illustration", "mask": b64})
+        assert c["illustration_version"] == [ni + 4, ni + 4], c["illustration_version"]
+        _, png = call(port, f"/file?slug={slug}&path=" + c["hd"]["illustration"], raw=True)
+        cut = Image.open(io.BytesIO(png)).convert("RGBA")
+        assert cut.getbbox()[0] >= hd.width // 2, cut.getbbox()
+        n_g = c["views"]["gauche"]["versions"]
+        _, png = call(port, f"/file?slug={slug}&path=" + c["views"]["gauche"]["file"], raw=True)
+        g = Image.open(io.BytesIO(png))
+        green = Image.new("RGB", g.size, (0, 255, 0))  # vert partout : tout est restauré
+        buf = io.BytesIO()
+        green.save(buf, "PNG")
+        _, c = call(port, "/cutout", {"slug": slug, "key": "gauche", "mask": base64.b64encode(buf.getvalue()).decode()})
+        assert c["views"]["gauche"]["versions"] == n_g + 1 and c["views"]["droite"]["file"], c["views"]["gauche"]
         before = c["portrait_version"][1]
         assert call(port, "/portrait", {"slug": slug})[0] == 200
         wait_job(port)
@@ -150,7 +190,8 @@ def main():
         meta = json.loads(Path(e["json"]).read_text(encoding="utf-8"))
         assert meta["rows"] == 4 and meta["directions"]["haut"]["row"] == 3 and Path(e["png"]).is_file()
         assert meta["fiche"]["histoire"] and (Path(e["folder"]) / "portrait.png").is_file()
-        atk = meta["attaques"][1]
+        assert (Path(e["folder"]) / meta["illustration"]).is_file() and (Path(e["folder"]) / meta["illustration_hd"]).is_file()
+        atk = meta["attaques"][-1]
         assert atk["genre"] == "projectile" and (Path(e["folder"]) / atk["effet_image"]).is_file(), atk
         assert len(atk["directions"]["gauche"]["frames"]) == 4 and "effet_decalage" in atk["directions"]["bas"]["frames"][2]
         assert Path(e["folder"]).parent == Path(call(port, "/exports")[1]["folder"]), e["folder"]
@@ -158,6 +199,7 @@ def main():
         assert meta["variantes"][0]["id"] == "chromatique" and (Path(e["folder"]) / "variantes/chromatique/attaque1.png").is_file()
         _, bal = call(port, "/balance")
         assert bal["total"] == 1 and sum(x["n"] for x in bal["raretes"]) == 1 and bal["alertes"], bal
+        assert "conseils" in bal and bal["creatures"][0]["prestige"] == 50, bal
 
         _, libr = call(port, "/library")
         assert [x["slug"] for x in libr] == [slug] and libr[0]["thumb"]
@@ -189,7 +231,13 @@ def main():
             _, c = call(port, "/creature?slug=" + fu["slug"])
             pa = [call(port, "/creature?slug=" + s_)[1]["lore"] for s_ in (r["slug"], r2["slug"])]
             assert c["lore"]["type"] in {p["type"] for p in pa}, c["lore"]["type"]
-            assert [a["nom"] for a in c["lore"]["combat"]["attaques"]] == [pa[0]["attaques"][0]["nom"], pa[1]["attaques"][-1]["nom"]]
+            names = [a["nom"] for a in c["lore"]["attaques"]]
+            assert names == [a["nom"] for a in pa[0]["attaques"][:2] + pa[1]["attaques"][-2:]], names
+            # posture écrite en toutes lettres (« rampante ») : elle prime sur ce que la plume a compris
+            _, rr = call(port, "/create", {"name": "Ver", "description": "une créature rampante", "seed": 3})
+            wait_job(port)
+            assert call(port, "/creature?slug=" + rr["slug"])[1]["brief"]["posture"] == "rampe"
+            call(port, "/delete", {"slug": rr["slug"]})
             for s_ in (r["slug"], r2["slug"], fu["slug"]):
                 call(port, "/delete", {"slug": s_})
         print("OK : toutes les routes répondent", "(moteur réel)" if real else "(moteur factice)")

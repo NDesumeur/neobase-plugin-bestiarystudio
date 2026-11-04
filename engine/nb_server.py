@@ -20,7 +20,7 @@ import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from PIL import Image, ImageOps
+from PIL import Image, ImageChops, ImageOps
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import nb_comfy as nbc  # noqa: E402
@@ -255,6 +255,11 @@ class Studio:
         try:
             self._free_gpu()
             brief = self.writer.brief(rec["description"], int(rec.get("seed", 1)))
+            said = self.eng.said_posture(rec["description"])  # « rampante » écrit en toutes lettres prime sur la plume
+            if said and said != brief.get("posture") and not (said == "rampe" and brief.get("posture") == "nage"):
+                brief["posture"] = said
+                if said in self.eng.LEGLESS:
+                    brief["pattes"] = 0
         except Exception as exc:  # pas d'Ollama : posture devinée par mots-clés
             print("description non analysée :", exc)
             brief = self.eng.guess_brief(rec["description"])
@@ -289,6 +294,7 @@ class Studio:
         except Exception as exc:  # pas d'Ollama : la créature est faite quand même, la fiche s'écrira plus tard
             print("fiche non écrite :", exc)
         self._portrait(self.client(), slug, progress, cancel)
+        self._illustration(self.client(), slug, progress, cancel)
         return slug
 
     def _portrait(self, c, slug, progress, cancel):
@@ -314,6 +320,57 @@ class Studio:
         self.lib.add_pil(slug, "portrait", im, "portrait : " + move.get("nom", move["genre"]) + note)
         self.lib.set_active(slug, "portrait", 10 ** 6)
         self.build_sprites(slug)
+
+    ILLUSTRATIONS = 3  # images du bestiaire tirées, la plus fidèle (modèle de vision) devient active
+
+    def _illustration(self, c, slug, progress, cancel):
+        """Image du bestiaire : plusieurs essais au calme, notés par le modèle de vision (bon nombre de têtes, pas de
+        pattes en trop, ressemblance à la description) ; la meilleure devient active, les autres restent en versions."""
+        rec = self.lib.load(slug)
+        brief, desc, seed = rec.get("brief"), rec.get("description", ""), int(time.time()) % 1000000
+        design = self._active(slug, "bas")
+        ims = [self.eng.generate_illustration(c, design, seed + 101 * i, progress, cancel, brief=brief, description=desc)
+               for i in range(self.ILLUSTRATIONS)]
+        seen, scores = [], []
+        if self.writer.vision_model():
+            progress("Vérification de l'image du bestiaire")
+            self._free_gpu()
+            try:
+                checks = bool(nb_check.expected_heads(brief) or nb_check.legless(brief))
+                seen = self.writer.look(ims) if checks else []
+                scores = self.writer.match(ims, ((brief or {}).get("en") or desc) + " " + "; ".join((brief or {}).get("anatomie", [])))
+            except Exception as exc:
+                print("image du bestiaire non vérifiée :", exc)
+        rows = []
+        for i, im in enumerate(ims):
+            ok, issues, _ = nb_check.verdict(seen[i], brief) if i < len(seen) else (True, [], 0)
+            sc = scores[i] if i < len(scores) else dict(score=0, missing=[])
+            bad = issues + sc["missing"]
+            note = (f" {sc['score']}/10" if scores else "") + (" ✓" if ok and not sc["missing"] else " ⚠ " + ", ".join(bad) if bad else "")
+            rows.append((ok, sc["score"], im, "bestiaire" + note))
+        rows.sort(key=lambda r: (r[0], r[1]))  # la meilleure en dernier : elle devient active
+        for _, _, im, note in rows:
+            self.lib.add_pil(slug, "illustration", im, note)
+        self.lib.set_active(slug, "illustration", 10 ** 6)
+        self._pixel_illustration(slug)
+
+    def _pixel_illustration(self, slug):
+        src = self._active(slug, "illustration")
+        out = self.lib.sprites_dir(slug) / "illustration.png"
+        if src is None:
+            out.unlink(missing_ok=True)
+            return
+        opts = dict(width=PORTRAIT, height=PORTRAIT, colors=48, outline=True, outline_color="#140c1c", align="Centré",
+                    margin=4, bg_remove=False)
+        sp.run_batch([("illustration", src)], opts, master_key="illustration", lock_palette=False)[0][1].save(out)
+
+    def illustration(self, slug):
+        if self.lib.load(slug) is None:
+            raise ValueError("Créature introuvable.")
+        if self.jobs.get()["running"]:
+            raise RuntimeError("Une tâche est déjà en cours.")
+        return self.jobs.start("illustration", lambda progress, cancel: (
+            self._illustration(self.client(), slug, progress, cancel), slug)[1], self.ILLUSTRATIONS + 1, slug)
 
     def portrait(self, slug):
         if self.lib.load(slug) is None:
@@ -381,15 +438,41 @@ class Studio:
             return lore
         rnd = random.Random(rec["slug"])
         lore["type"] = rnd.choice([p.get("type") for p in parents if p.get("type")] or [lore.get("type")])
-        moves = [(p.get("attaques") or [None, None]) for p in parents]
-        mixed = [m for m in (moves[0][0], moves[1][-1]) if m]
-        if len(mixed) == 2:
+        moves = [(p.get("attaques") or []) for p in parents]
+        mixed = moves[0][:2] + moves[1][-2:]  # les rapides de l'un, les fortes de l'autre
+        if len(mixed) >= 2:
             lore["attaques"] = mixed
         try:
             lore["menace"] = max(int(p.get("menace", 3)) for p in parents)
         except (TypeError, ValueError):
             pass
+        best = [p["prestige"] for p in parents if isinstance(p.get("prestige"), int)]
+        if best and isinstance(lore.get("prestige"), int):
+            lore["prestige"] = max(lore["prestige"], max(best))  # l'hybride impressionne au moins autant que ses parents
         return lore
+
+    def _prestiges(self, but=None):
+        """Le prestige des autres créatures du bestiaire (le classement fixe la rareté quand il y en a assez)."""
+        return [(r.get("lore") or {}).get("prestige") for r in self.lib.list()
+                if r.get("slug") != but and isinstance((r.get("lore") or {}).get("prestige"), int)]
+
+    def _card(self, rec):
+        brief = rec.get("brief") or {}
+        return nb_stats.card(rec["slug"], rec["lore"], brief.get("posture", ""), rec.get("rarete_fixe"),
+                             self._prestiges(rec["slug"]), brief.get("anatomie", []))
+
+    def set_rarity(self, slug, rarete=None):
+        """Rareté choisie à la main (verrouillée), ou None : de nouveau calculée d'après le prestige."""
+        rec = self.lib.load(slug)
+        if rec is None or not (rec.get("lore") or {}).get("combat"):
+            raise ValueError("Pas encore de fiche de combat.")
+        if rarete not in (None, "", *nb_stats.RARITIES):
+            raise ValueError("Rareté inconnue.")
+        rec["rarete_fixe"] = rarete or None
+        rec["lore"]["combat"] = self._card(rec)
+        self.lib.save(rec)
+        self.build_attacks(slug)
+        return self.creature(slug)
 
     # ------------------------------------------------------------- équilibrage
     def balance(self):
@@ -403,8 +486,8 @@ class Studio:
                 missing += 1
                 continue
             rows.append(dict(slug=rec["slug"], nom=rec["name"], type=rec["lore"].get("type"), rarete=card["rarete"],
-                             total=sum(card["stats"].values()), stats=card["stats"],
-                             variantes=len(rec.get("variants", []))))
+                             total=sum(card["stats"].values()), stats=card["stats"], prestige=rec["lore"].get("prestige"),
+                             fixe=bool(rec.get("rarete_fixe")), variantes=len(rec.get("variants", []))))
         n = len(rows)
         weights = sum(nb_stats.WEIGHTS)
         rare = [dict(nom=r, n=sum(x["rarete"] == r for x in rows), attendu=round(100 * w / weights))
@@ -429,7 +512,20 @@ class Studio:
                 alerts.append("Aucune créature commune : un bestiaire a besoin de créatures ordinaires.")
         elif n:
             alerts.append("Encore trop peu de créatures pour juger l'équilibre (4 au moins).")
-        return dict(total=n, raretes=rare, types=types, moyennes=avg, creatures=rows, alertes=alerts)
+        # conseils : la rareté que le prestige mérite aujourd'hui, comparée au reste du bestiaire
+        tips = []
+        for x in rows:
+            if x["fixe"] or not isinstance(x["prestige"], int):
+                continue
+            others = [y["prestige"] for y in rows if y is not x and isinstance(y["prestige"], int)]
+            want = nb_stats.RARITIES[nb_stats.tier_of(x["prestige"], others)]
+            if want != x["rarete"]:
+                tips.append(dict(slug=x["slug"], nom=x["nom"], actuelle=x["rarete"], conseillee=want, prestige=x["prestige"]))
+        old = sum(1 for x in rows if not isinstance(x["prestige"], int))
+        if old:
+            alerts.append(f"{old} fiche{'s' if old > 1 else ''} sans prestige (rareté tirée au sort) : « Réécrire la fiche » "
+                          "la rend fidèle à la créature.")
+        return dict(total=n, raretes=rare, types=types, moyennes=avg, creatures=rows, alertes=alerts, conseils=tips)
 
     def _free_gpu(self):
         """Le modèle d'image et celui de texte se partagent la carte : on demande à ComfyUI de libérer la mémoire."""
@@ -455,13 +551,14 @@ class Studio:
             self._free_gpu()
         rec = self.lib.load(slug)
         rec["lore"] = self._mix_lore(rec, self.writer.lore(rec["name"], rec.get("description", ""), int(time.time()) % 100000))
-        rec["lore"]["combat"] = nb_stats.card(slug, rec["lore"], (rec.get("brief") or {}).get("posture", ""))
+        rec["lore"]["combat"] = self._card(rec)
         self.lib.save(rec)
         self.build_attacks(slug)
         return self.creature(slug)
 
     def _rest_steps(self, slug):
-        return 2 * self.eng.TRIES + 2  # la marche est calculée (pas d'image à générer) ; +2 : la fiche et le portrait
+        # la marche est calculée (pas d'image à générer) ; +2 : la fiche et le portrait ; puis l'image du bestiaire
+        return 2 * self.eng.TRIES + 2 + self.ILLUSTRATIONS + 1
 
     def finish(self, slug, index):
         """Le design choisi parmi les esquisses devient la créature : directions et marche."""
@@ -579,6 +676,34 @@ class Studio:
             return slug
         return self.jobs.start("edit", run, 1, slug)
 
+    CUTOUT_KEYS = ("bas", "haut", "gauche", "portrait", "illustration")
+
+    def cutout(self, slug, key, mask_b64):
+        """Détourage corrigé au pinceau : mask = PNG à la taille de l'image, rouge = à effacer, vert = à restaurer
+        (les pixels d'origine sont gardés sous la transparence). Nouvelle version de la vue, la marche et les sprites suivent."""
+        rec = self.lib.load(slug)
+        if rec is None or key not in self.CUTOUT_KEYS:
+            raise ValueError("Image inconnue.")
+        if self.jobs.get()["running"]:
+            raise RuntimeError("Une tâche est déjà en cours.")
+        im = self._active(slug, key)
+        if im is None:
+            raise ValueError("Pas encore d'image à détourer.")
+        m = Image.open(io.BytesIO(base64.b64decode(mask_b64.split(",")[-1]))).convert("RGB").resize(im.size, Image.Resampling.NEAREST)
+        r, g, _ = m.split()
+        a = ImageChops.subtract(im.getchannel("A"), r.point(lambda v: 255 if v > 128 else 0))
+        im.putalpha(ImageChops.lighter(a, g.point(lambda v: 255 if v > 128 else 0)))
+        if not im.getbbox():
+            raise ValueError("Tout a été effacé.")
+        self.lib.add_pil(slug, key, im, "détourage retouché")
+        self.lib.set_active(slug, key, 10 ** 6)
+        if key in DIRS and rec.get("views", {}).get("haut"):  # créature finie : la marche repart de la vue corrigée
+            self._walk(None, slug, key, lambda m_: None, lambda: False)
+            if key == "gauche":
+                self._mirror_walk(slug)
+        self.build_sprites(slug)
+        return self.creature(slug)
+
     def choose(self, slug, key, delta=None, index=None):
         """Change la version active d'une vue (direction ou pas) puis refait les sprites."""
         if delta is not None:
@@ -613,6 +738,11 @@ class Studio:
                     anims={n: list(t) for n, t in nb_anim.ANIMS.items()}, variants=rec.get("variants", []),
                     portrait="sprites/portrait.png" if (sd / "portrait.png").is_file() else None,
                     portrait_version=self.lib.version_info(rec, "portrait")[:2], parents=rec.get("parents", []),
+                    illustration="sprites/illustration.png" if (sd / "illustration.png").is_file() else None,
+                    hd={k: str(p.relative_to(self.lib.dir(slug))).replace("\\", "/") for k in ("portrait", "illustration")
+                        for p in [self.lib.active_path(rec, k)] if p},
+                    illustration_version=self.lib.version_info(rec, "illustration")[:2],
+                    illustration_note=self.lib.version_info(rec, "illustration")[2],
                     variant_choices=[dict(id=v, label=nb_variant.label(v)) for v in nb_variant.VARIANTS],
                     forms=self.forms(rec),
                     pending=not rec.get("views", {}).get("haut"))  # esquisses pas encore choisies
@@ -684,13 +814,14 @@ class Studio:
         self.lib.save(rec)
         self._sheet(slug)
         self._pixel_portrait(slug)
+        self._pixel_illustration(slug)
         self.build_attacks(slug)
         return self.creature(slug)
 
     def _moves(self, rec):
         return ((rec.get("lore") or {}).get("combat") or {}).get("attaques") or []
 
-    def _combat_anims(self, folder, moves, legs):
+    def _combat_anims(self, folder, moves, legs, move=None):
         """Dans folder (les 12 sprites de marche y sont) : les 2 attaques (corps + effet) et les animations
         attente / dégâts / K.O., une ligne par direction. Rend les décalages des effets {n: {direction: [...]}}."""
         fx = {}
@@ -698,7 +829,7 @@ class Studio:
         for row, d in enumerate(DIRS):
             rest = folder / f"{d}_repos.png"
             if rest.is_file():
-                for name, frames in nb_anim.build(Image.open(rest).convert("RGBA"), d).items():
+                for name, frames in nb_anim.build(Image.open(rest).convert("RGBA"), d, move).items():
                     for i, im in enumerate(frames):
                         sheets[name].paste(im, (i * CELL, row * CELL))
         for name, sheet in sheets.items():
@@ -734,26 +865,27 @@ class Studio:
         if not (sd / "bas_repos.png").is_file():
             return
         legs = self.eng.has_legs(rec.get("description", ""), rec.get("brief"))
-        fx = self._combat_anims(sd, moves, legs)
-        vfx = {vid: self._build_variant(rec, vid, legs) for vid in rec.get("variants", [])}
+        move = self.eng.motion(rec.get("description", ""), rec.get("brief"))
+        fx = self._combat_anims(sd, moves, legs, move)
+        vfx = {vid: self._build_variant(rec, vid, legs, move) for vid in rec.get("variants", [])}
         rec = self.lib.load(slug)
         rec["attack_fx"], rec["variant_fx"] = fx, vfx
         self.lib.save(rec)
         self._arena(slug)
 
-    def _build_variant(self, rec, vid, legs):
+    def _build_variant(self, rec, vid, legs, move=None):
         """La variante : les sprites (et le portrait) repeints, puis ses propres attaques et animations."""
         sd = self.lib.sprites_dir(rec["slug"])
         vd = sd / "variantes" / vid
         vd.mkdir(parents=True, exist_ok=True)
-        names = [f"{d}_{f}.png" for d in DIRS for f in FRAMES] + ["sheet.png", "portrait.png"]
+        names = [f"{d}_{f}.png" for d in DIRS for f in FRAMES] + ["sheet.png", "portrait.png", "illustration.png"]
         srcs = {n: Image.open(sd / n).convert("RGBA") for n in names if (sd / n).is_file()}
         fn, cache = nb_variant.color_fn(vid, rec["slug"], nb_variant.colors_of(srcs.values())), {}
         for n, im in srcs.items():
             nb_variant.recolor(im, fn, cache).save(vd / n)
         card = ((rec.get("lore") or {}).get("combat"))
         moves = nb_variant.card(card, vid)["attaques"] if card else []
-        return self._combat_anims(vd, moves, legs)
+        return self._combat_anims(vd, moves, legs, move)
 
     def add_variant(self, slug, vid):
         rec = self.lib.load(slug)
@@ -881,10 +1013,14 @@ class Studio:
         for f in self.forms(rec)[1:]:  # chaque variante : ses planches dans variantes/<id>/, mêmes noms de fichiers
             vd, dst = self.lib.dir(slug) / f["dossier"], out / "variantes" / f["id"]
             dst.mkdir(parents=True, exist_ok=True)
-            for n in ["sheet", "portrait", *nb_anim.ANIMS] + [f"{k}{i}" for i in (1, 2) for k in ("attaque", "effet")]:
+            for n in ["sheet", "portrait", "illustration", *nb_anim.ANIMS] + [f"{k}{i}" for i in range(1, 5) for k in ("attaque", "effet")]:
                 if (vd / f"{n}.png").is_file():
                     shutil.copyfile(vd / f"{n}.png", dst / f"{n}.png")
             meta["variantes"].append(dict(id=f["id"], nom=f["nom"], dossier=f"variantes/{f['id']}/", combat=f["combat"]))
+        if (sd / "illustration.png").is_file():  # l'image du bestiaire (pixel 256) et sa version détaillée
+            shutil.copyfile(sd / "illustration.png", out / "illustration.png")
+            self._active(slug, "illustration").save(out / "illustration_hd.png")
+            meta["illustration"], meta["illustration_hd"] = "illustration.png", "illustration_hd.png"
         design = self._active(slug, "bas")
         if (sd / "portrait.png").is_file():  # le portrait de combat, sinon le design en grand
             shutil.copyfile(sd / "portrait.png", out / "portrait.png")
@@ -947,6 +1083,8 @@ def make_handler(studio, token):
         "/cancel": lambda b: studio.jobs.cancel() or dict(ok=True),
         "/redo": lambda b: dict(job=studio.redo(b["slug"], b["dir"])),
         "/continue": lambda b: dict(job=studio.finish(b["slug"], b["index"])),
+        "/rarity": lambda b: studio.set_rarity(b["slug"], b.get("rarete")),
+        "/cutout": lambda b: studio.cutout(b["slug"], b["key"], b["mask"]),
         "/edit": lambda b: dict(job=studio.edit(b["slug"], b["key"], b.get("instruction"), b.get("zone"), b.get("index"))),
         "/inspire": lambda b: studio.inspire(b.get("theme"), b.get("seed")),
         "/lore": lambda b: studio.write_lore(b["slug"]),
@@ -959,6 +1097,7 @@ def make_handler(studio, token):
         "/delete": lambda b: studio.delete(b["slug"]),
         "/variant": lambda b: studio.add_variant(b["slug"], b["variant"]),
         "/portrait": lambda b: dict(job=studio.portrait(b["slug"])),
+        "/illustration": lambda b: dict(job=studio.illustration(b["slug"])),
         "/fuse": lambda b: dict(zip(("job", "slug"), studio.fuse(b.get("a"), b.get("b"), b.get("seed")))),
         "/variant-remove": lambda b: studio.remove_variant(b["slug"], b["variant"]),
         "/install-models": lambda b: dict(job=studio.install_models()),

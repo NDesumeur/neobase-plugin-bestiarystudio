@@ -104,11 +104,22 @@ const HTML = `<link rel="stylesheet" href="${U}ui/studio.css">
       <div class="nbs-parch nbs-fiche" id="fiche"></div>
       <div class="nbs-row" style="margin-top:8px">
         <button class="nbs-btn dark" id="relore">${ic('refaire')}Réécrire la fiche</button>
+        <span class="nbs-hint" id="loreMsg"></span>
+      </div>
+      <div class="nbs-row" style="margin-top:8px">
+        <button class="nbs-btn dark" id="illuRedo">${ic('crayon')}Refaire l'image</button>
+        <button class="nbs-btn dark sq" id="iPrev" title="Image précédente">${ic('prev')}</button>
+        <span class="nbs-num" id="iVer">—</span>
+        <button class="nbs-btn dark sq" id="iNext" title="Image suivante">${ic('next')}</button>
+        <button class="nbs-btn dark" id="illuCut">${ic('gomme')}Détourage</button>
+        <span class="nbs-hint" id="iNote"></span>
+      </div>
+      <div class="nbs-row" style="margin-top:8px">
         <button class="nbs-btn dark" id="portraitRedo">${ic('crayon')}Refaire le portrait</button>
         <button class="nbs-btn dark sq" id="pPrev" title="Portrait précédent">${ic('prev')}</button>
         <span class="nbs-num" id="pVer">—</span>
         <button class="nbs-btn dark sq" id="pNext" title="Portrait suivant">${ic('next')}</button>
-        <span class="nbs-hint" id="loreMsg"></span>
+        <button class="nbs-btn dark" id="portraitCut">${ic('gomme')}Détourage</button>
       </div>
     </section>
 
@@ -143,7 +154,7 @@ const HTML = `<link rel="stylesheet" href="${U}ui/studio.css">
         <div class="grow">
           <div class="nbs-title">Aperçu en jeu</div>
           <div class="nbs-world" id="world"><div class="road"></div><img class="hero" id="hero" alt=""><img class="fx" id="heroFx" alt=""></div>
-          <div class="nbs-keys" style="margin-top:8px">Flèches : marcher · 1 et 2 : attaquer</div>
+          <div class="nbs-keys" style="margin-top:8px">Flèches : marcher · 1 à 4 : attaquer</div>
           <div class="nbs-sep"></div>
           <div class="nbs-title">Réglages</div>
           <div class="nbs-opt" data-o="outline"><span class="nbs-check"></span>Contour sombre</div>
@@ -178,6 +189,32 @@ const HTML = `<link rel="stylesheet" href="${U}ui/studio.css">
       <div id="eq"><div class="nbs-hint">Lecture du bestiaire…</div></div>
     </section>
   </main>
+  <div class="nbs-modal" id="cutout" hidden>
+    <div class="nbs-frame nbs-modal-box">
+      <div class="nbs-title" id="ctTitle">Détourage</div>
+      <div class="nbs-rt-cols">
+        <div class="nbs-rt-pic nbs-well nbs-ct-pic" id="ctPic"><img id="ctImg" alt=""><canvas id="ctMask"></canvas></div>
+        <div class="nbs-rt-side">
+          <div class="nbs-hint">Peins sur l'image. La gomme retire ce qui dépasse (en rouge) ; « Restaurer » ramène ce que le détourage a mangé (en vert).</div>
+          <div class="nbs-row nbs-themes" id="ctTool" style="margin-top:8px">
+            <button class="nbs-btn dark sm on" data-t="erase">Gomme</button>
+            <button class="nbs-btn dark sm" data-t="keep">Restaurer</button>
+          </div>
+          <div class="nbs-row nbs-themes" id="ctSize" style="margin-top:8px">
+            <button class="nbs-btn dark sm" data-s=".012">Fin</button>
+            <button class="nbs-btn dark sm on" data-s=".03">Moyen</button>
+            <button class="nbs-btn dark sm" data-s=".07">Large</button>
+          </div>
+          <div class="nbs-row" style="margin-top:12px">
+            <button class="nbs-btn go" id="ctGo">${ic('ok')}Valider</button>
+            <button class="nbs-btn dark" id="ctClear">${ic('refaire')}Effacer les traits</button>
+            <button class="nbs-btn dark" id="ctClose">Annuler</button>
+          </div>
+          <div class="nbs-hint" id="ctMsg" style="margin-top:8px">Le résultat devient une nouvelle version : l'ancienne reste avec ◀ ▶.</div>
+        </div>
+      </div>
+    </div>
+  </div>
   <div class="nbs-modal" id="retouch" hidden>
     <div class="nbs-frame nbs-modal-box">
       <div class="nbs-title" id="rtTitle">Retouche</div>
@@ -288,7 +325,8 @@ export default async function (ctx) {
     busy(false);
     if (j.error) { say(j.error, true); return null; }
     say(j.kind === 'sketch' ? 'Choisis ton design ↓' : j.kind === 'edit' ? 'Retouche faite ✓ (nouvelle version)'
-      : j.kind === 'portrait' ? 'Portrait de combat prêt ✓ (onglet Directions, fiche)' : 'Créature invoquée ✓');
+      : j.kind === 'portrait' ? 'Portrait de combat prêt ✓ (onglet Directions, fiche)'
+      : j.kind === 'illustration' ? 'Image du bestiaire prête ✓ (onglet Directions, fiche)' : 'Créature invoquée ✓');
     get('/status').then(status).catch(() => {});
     if (j.slug) await open(j.slug);
     return j;
@@ -361,26 +399,45 @@ export default async function (ctx) {
   function renderFiche() {
     const f = S.cr?.lore, box = $('#fiche'), F = form();
     if (!S.cr) { box.innerHTML = '<div class="nbs-hint">Aucune créature ouverte.</div>'; return; }
-    const big = S.cr.portrait ? src(F.dossier + 'portrait.png') : '', pic = big || src(F.dossier + 'bas_repos.png');
-    const pv = S.cr.portrait_version || [0, 0];
+    const big = S.cr.illustration ? src(F.dossier + 'illustration.png') : S.cr.portrait ? src(F.dossier + 'portrait.png') : '';
+    const pic = big || src(F.dossier + 'bas_repos.png');
+    const pv = S.cr.portrait_version || [0, 0], iv = S.cr.illustration_version || [0, 0];
     $('#pVer').textContent = pv[1] ? `${pv[0]} / ${pv[1]}` : '—';
+    $('#iVer').textContent = iv[1] ? `${iv[0]} / ${iv[1]}` : '—';
+    $('#iNote').textContent = (S.cr.illustration_note || '').replace(/^bestiaire\s*/, '');
     box.innerHTML = f ? `<div class="nbs-fiche-top">${pic ? `<div class="nbs-fiche-pic nbs-well${big ? ' big' : ''}"><img src="${pic}" alt=""></div>` : ''}
       <div><div class="nbs-fiche-head"><b>${esc(F.nom || S.cr.name)}</b><span class="nbs-type">${esc(F.id === 'base' || F.id === 'chromatique' ? f.type : F.id)}</span></div>
       <dl class="nbs-fiche-stats"><dt>Espèce</dt><dd>${esc(f.espece)}</dd><dt>Taille</dt><dd>${esc(f.taille)}</dd>
       <dt>Poids</dt><dd>${esc(f.poids)}</dd><dt>Habitat</dt><dd>${esc(f.habitat)}</dd></dl></div></div>
       <p class="nbs-read">${esc(f.description)}</p>
-      <div class="nbs-story"><div class="nbs-story-t">Légende</div><p class="nbs-read">${esc(f.histoire)}</p></div>${combat(F.combat || f.combat)}`
+      <div class="nbs-story"><div class="nbs-story-t">Légende</div><p class="nbs-read">${esc(f.histoire)}</p></div>${combat(F.combat || f.combat, S.cr.illustration && S.cr.portrait ? src(F.dossier + 'portrait.png') : '')}`
       : '<div class="nbs-hint">Pas encore de fiche : clique « Réécrire la fiche ».</div>';
+    const rs = $('#rarSel');
+    if (rs) rs.onchange = async () => {
+      $('#loreMsg').textContent = 'Nouvelle rareté…';
+      try { refresh(await post('/rarity', { slug: S.cr.slug, rarete: rs.value || null })); $('#loreMsg').textContent = ''; }
+      catch (e) { $('#loreMsg').textContent = e.message; }
+    };
   }
   const STAT = { pv: 'PV', attaque: 'Attaque', defense: 'Défense', vitesse: 'Vitesse' };
-  const GENRE = { griffe: 'griffes', morsure: 'morsure', charge: 'charge', projectile: 'projectile', souffle: 'souffle', onde: 'onde', rayon: 'rayon' };
-  function combat(k) {
+  const GENRE = { griffe: 'griffes', morsure: 'morsure', charge: 'charge', fouet: 'fouet', corne: 'corne', dard: 'dard', etreinte: 'étreinte',
+    projectile: 'projectile', souffle: 'souffle', rayon: 'rayon', cri: 'cri', rafale: 'rafale', pluie: 'pluie', onde: 'onde',
+    explosion: 'explosion', soin: 'soin', renfort: 'renfort' };
+  const STATUT = { 'brûlure': 'brûle', poison: 'empoisonne', gel: 'gèle', paralysie: 'paralyse' };
+  const moveExtra = a => a.effet?.soin ? `<span class="nbs-pow">soigne ${a.effet.soin} % des PV</span>`
+    : a.effet?.attaque ? `<span class="nbs-pow">attaque +${a.effet.attaque} %</span>`
+    : `<span class="nbs-pow">puissance ${a.puissance}</span>${a.statut ? ` <span class="nbs-pow">· ${STATUT[a.statut.nom] || esc(a.statut.nom)} (${a.statut.chance} %)</span>` : ''}`;
+  function combat(k, portrait) {
     if (!k) return '';
     const chips = (l, cls) => l.map(t => `<span class="nbs-chip ${cls}">${esc(t)}</span>`).join(' ') || '—';
-    return `<div class="nbs-combat"><div class="nbs-combat-head"><span class="nbs-rare r${['commun', 'peu commun', 'rare', 'épique', 'légendaire'].indexOf(k.rarete)}">${esc(k.rarete)}</span></div>
+    const base = form().id === 'base';
+    const rar = base ? `<select class="nbs-rarsel" id="rarSel" title="Rareté : calculée d'après le prestige, ou choisie à la main">
+        <option value="">auto${k.prestige != null ? ` · prestige ${k.prestige}` : ''}</option>
+        ${RAR.map(r => `<option value="${r}"${k.rarete_fixe && k.rarete === r ? ' selected' : ''}>${r} (fixée)</option>`).join('')}</select>` : '';
+    return `<div class="nbs-combat">${portrait ? `<div class="nbs-fiche-pic nbs-well nbs-combat-pic"><img src="${portrait}" alt="" title="Portrait de combat"></div>` : ''}<div class="nbs-combat-head"><span class="nbs-rare r${RAR.indexOf(k.rarete)}">${esc(k.rarete)}</span>${k.rarete_fixe ? ' <span class="nbs-pow">🔒</span>' : ''} ${rar}</div>
       <div class="nbs-statgrid">${Object.entries(STAT).map(([key, label]) => `<span>${label}</span><i><b style="width:${Math.min(100, k.stats[key])}%"></b></i><em>${k.stats[key]}</em>`).join('')}</div>
       <div class="nbs-read nbs-weak"><b>Faible contre</b> ${chips(k.faiblesses, 'bad')} &nbsp; <b>Résiste à</b> ${chips(k.resistances, 'good')}</div>
-      ${k.attaques.map((a, i) => `<div class="nbs-move"><div class="nbs-move-t">${i + 1}. ${esc(a.nom)} <span class="nbs-chip">${esc(a.element)}</span> <span class="nbs-chip">${GENRE[a.genre] || esc(a.genre)}</span> <span class="nbs-pow">puissance ${a.puissance}</span></div><p class="nbs-read">${esc(a.description)}</p></div>`).join('')}</div>`;
+      ${k.attaques.map((a, i) => `<div class="nbs-move"><div class="nbs-move-t">${i + 1}. ${esc(a.nom)} <span class="nbs-chip">${esc(a.element)}</span> <span class="nbs-chip">${GENRE[a.genre] || esc(a.genre)}</span> ${moveExtra(a)}</div><p class="nbs-read">${esc(a.description)}</p></div>`).join('')}</div>`;
   }
   // ------------------------------------------------------------ attaques animées (corps + calque d'effet)
   const imgCache = {};
@@ -463,6 +520,58 @@ export default async function (ctx) {
   };
   $('#rtText').onkeydown = e => { if (e.key === 'Enter') $('#rtGo').click(); };
 
+  $('#illuRedo').onclick = () => {
+    if (!S.cr || S.cr.pending) return;
+    show('creer');
+    runJob(() => post('/illustration', { slug: S.cr.slug }));
+  };
+  const illuTurn = async delta => {
+    if (!S.cr?.illustration_version?.[1]) return;
+    try { refresh(await post('/choose', { slug: S.cr.slug, key: 'illustration', delta })); } catch (e) { $('#loreMsg').textContent = e.message; }
+  };
+  $('#iPrev').onclick = () => illuTurn(-1);
+  $('#iNext').onclick = () => illuTurn(1);
+  $('#illuCut').onclick = () => S.cr?.hd?.illustration && openCutout('illustration', src(S.cr.hd.illustration));
+  $('#portraitCut').onclick = () => S.cr?.hd?.portrait && openCutout('portrait', src(S.cr.hd.portrait));
+
+  // ------------------------------------------------------------ détourage au pinceau (rouge : effacer, vert : restaurer)
+  const CT = { key: '', tool: 'erase', size: .03, down: false };
+  const CT_NAMES = { bas: 'la face', haut: 'le dos', gauche: 'le profil', portrait: 'le portrait de combat', illustration: "l'image du bestiaire" };
+  function openCutout(key, url) {
+    if (!url) return;
+    CT.key = key;
+    $('#ctTitle').textContent = `Détourage de ${CT_NAMES[key] || key}`;
+    $('#ctMsg').textContent = "Le résultat devient une nouvelle version : l'ancienne reste avec ◀ ▶.";
+    const img = $('#ctImg'), cv = $('#ctMask');
+    img.onload = () => { cv.width = img.naturalWidth; cv.height = img.naturalHeight; placeMask(); };
+    img.src = url;
+    $('#cutout').hidden = false;
+  }
+  function placeMask() {  // le calque couvre exactement l'image affichée (object-fit: contain)
+    const img = $('#ctImg'), cv = $('#ctMask'), box = $('#ctPic'), W = box.clientWidth, H = box.clientHeight;
+    const k = Math.min(W / img.naturalWidth, H / img.naturalHeight), w = img.naturalWidth * k, h = img.naturalHeight * k;
+    Object.assign(cv.style, { left: (W - w) / 2 + 'px', top: (H - h) / 2 + 'px', width: w + 'px', height: h + 'px' });
+  }
+  function ctPaint(e) {
+    const cv = $('#ctMask'), b = cv.getBoundingClientRect(), g = cv.getContext('2d');
+    const x = (e.clientX - b.left) / b.width * cv.width, y = (e.clientY - b.top) / b.height * cv.height;
+    g.fillStyle = CT.tool === 'erase' ? '#ff0000' : '#00ff00';
+    g.beginPath(); g.arc(x, y, CT.size * cv.width, 0, Math.PI * 2); g.fill();
+  }
+  $('#ctMask').onpointerdown = e => { CT.down = true; $('#ctMask').setPointerCapture(e.pointerId); ctPaint(e); };
+  $('#ctMask').onpointermove = e => { if (CT.down) ctPaint(e); };
+  $('#ctMask').onpointerup = () => { CT.down = false; };
+  $$('#ctTool .nbs-btn').forEach(b => b.onclick = () => { CT.tool = b.dataset.t; $$('#ctTool .nbs-btn').forEach(x => x.classList.toggle('on', x === b)); });
+  $$('#ctSize .nbs-btn').forEach(b => b.onclick = () => { CT.size = +b.dataset.s; $$('#ctSize .nbs-btn').forEach(x => x.classList.toggle('on', x === b)); });
+  $('#ctClear').onclick = () => { const cv = $('#ctMask'); cv.getContext('2d').clearRect(0, 0, cv.width, cv.height); };
+  $('#ctClose').onclick = () => { $('#cutout').hidden = true; };
+  $('#ctGo').onclick = async () => {
+    const b = $('#ctGo'); b.disabled = true; $('#ctMsg').textContent = 'Détourage…';
+    try { refresh(await post('/cutout', { slug: S.cr.slug, key: CT.key, mask: $('#ctMask').toDataURL('image/png') })); $('#cutout').hidden = true; }
+    catch (e) { $('#ctMsg').textContent = e.message; }
+    b.disabled = false;
+  };
+
   $('#portraitRedo').onclick = () => {
     if (!S.cr || S.cr.pending) return;
     show('creer');
@@ -497,7 +606,8 @@ export default async function (ctx) {
     box.hidden = !pending;
     if (!pending) return;
     const b = S.cr.brief, P = { quatre_pattes: 'à quatre pattes', deux_jambes: 'debout sur deux jambes', plusieurs_pattes: `sur ${b?.pattes} pattes`,
-      flotte: 'flotte dans les airs, sans pattes', vole: 'vole', rampe: 'rampe, sans pattes', nage: 'nage, sans pattes' };
+      flotte: 'flotte dans les airs, sans pattes', vole: 'vole', rampe: 'rampe, sans pattes', nage: 'nage, sans pattes',
+      sautille: 'avance par bonds', roule: 'roule en boule', glisse: 'glisse comme une gelée', enracine: 'enracinée dans le sol' };
     $('#understood').textContent = b?.posture ? `Compris : ${P[b.posture] || b.posture}. Le dos et le profil suivront cette posture.` : '';
     // note du contrôle automatique : « esquisse 2 ✓ » ou « esquisse 3 ⚠ 1 tête au lieu de 3 »
     const checkNote = n => { const m = /([✓⚠].*)$/.exec(n || ''); return m ? `<span class="nbs-verdict ${m[1][0] === '✓' ? 'ok' : 'ko'}">${m[1] === '✓' ? '✓ vérifiée' : esc(m[1])}</span>` : ''; };
@@ -521,7 +631,12 @@ export default async function (ctx) {
       `<div class="nbs-row"><div class="nbs-ver"><button class="nbs-btn dark sq" data-v="-1" data-d="${d}">${ic('prev')}</button>` +
       `<span>${verTxt(d)}</span><button class="nbs-btn dark sq" data-v="1" data-d="${d}">${ic('next')}</button></div>` +
       `<button class="nbs-btn dark nbs-redo" data-redo="${d}">${ic('refaire')}Refaire</button>` +
-      (d === 'droite' ? '' : `<button class="nbs-btn dark nbs-redo" data-rt="${d}">${ic('crayon')}Retoucher</button>`) + `</div>`).join('');
+      (d === 'droite' ? '' : `<button class="nbs-btn dark nbs-redo" data-rt="${d}">${ic('crayon')}Retoucher</button>` +
+        `<button class="nbs-btn dark nbs-redo" data-ct="${d}">${ic('gomme')}Détourage</button>`) + `</div>`).join('');
+    box.querySelectorAll('[data-ct]').forEach(b => b.onclick = () => {
+      const k = b.dataset.ct, v = S.cr.views[k];
+      openCutout(k, v?.file ? src(v.file) : '');
+    });
     box.querySelectorAll('.cell').forEach(c => c.onclick = () => { S.sel = c.dataset.k; renderSheet(); });
     box.querySelectorAll('[data-v]').forEach(b => b.onclick = async () => {
       const d = b.dataset.d, f = S.sel.startsWith(d + '_') ? S.sel.slice(d.length + 1) : 'repos';
@@ -580,7 +695,7 @@ export default async function (ctx) {
     if (!view.isConnected) { removeEventListener('keydown', onKey, true); removeEventListener('keyup', onUp, true); return; }
     if (S.tab !== 'lab' || /INPUT|TEXTAREA/.test(document.activeElement?.tagName)) return;
     if (KEYS[e.key]) { hero.keys.add(e.key); e.preventDefault(); }
-    if ((e.key === '1' || e.key === '2') && !hero.atk && S.cr?.attack_fx?.[e.key]) { hero.atk = +e.key; hero.atkI = 0; e.preventDefault(); }
+    if (/^[1-4]$/.test(e.key) && !hero.atk && S.cr?.attack_fx?.[e.key]) { hero.atk = +e.key; hero.atkI = 0; e.preventDefault(); }
     if (e.ctrlKey && e.key.toLowerCase() === 'z') { undo(); e.preventDefault(); }
     if (e.ctrlKey && e.key.toLowerCase() === 'y') { redo(); e.preventDefault(); }
   };
@@ -774,13 +889,23 @@ export default async function (ctx) {
       <div class="grow">
         <div class="nbs-title">À surveiller</div>
         ${B.alertes.length ? `<ul class="nbs-alerts">${B.alertes.map(a => `<li>${esc(a)}</li>`).join('')}</ul>` : '<div class="nbs-ok">✓ Bestiaire équilibré</div>'}
+        ${B.conseils?.length ? `<div class="nbs-title" style="margin-top:14px">Raretés conseillées</div>
+        <div class="nbs-hint">D'après le prestige de chaque créature, comparé au reste du bestiaire.</div>
+        <div class="nbs-eqlist">${B.conseils.map(t => `<div class="nbs-eqrow nbs-tip"><span class="nm">${esc(t.nom)} <span class="nbs-hint">· prestige ${t.prestige}</span></span>
+          <span class="nbs-rare r${RAR.indexOf(t.actuelle)}">${esc(t.actuelle)}</span>→<span class="nbs-rare r${RAR.indexOf(t.conseillee)}">${esc(t.conseillee)}</span>
+          <button class="nbs-btn dark sm" data-tip="${esc(t.slug)}" data-r="${esc(t.conseillee)}">Appliquer</button></div>`).join('')}</div>` : ''}
         <div class="nbs-title" style="margin-top:14px">Classement</div>
         <div class="nbs-eqlist">${B.creatures.sort((x, y) => y.total - x.total).map(c => `<div class="nbs-eqrow" data-s="${esc(c.slug)}">
           <img src="${U}lib/${encodeURIComponent(c.slug)}/sprites/bas_repos.png" alt=""><span class="nm">${esc(c.nom)}</span>
           <span class="nbs-rare r${RAR.indexOf(c.rarete)}">${esc(c.rarete)}</span><span class="nbs-chip">${esc(c.type)}</span>
           <em>${c.total}</em>${c.variantes ? `<span class="nbs-hint">+${c.variantes} var.</span>` : ''}</div>`).join('')}</div>
       </div></div>`;
-    $$('#eq .nbs-eqrow').forEach(row => row.onclick = async () => { await open(row.dataset.s); show('dirs'); });
+    $$('#eq .nbs-eqrow[data-s]').forEach(row => row.onclick = async () => { await open(row.dataset.s); show('dirs'); });
+    $$('#eq [data-tip]').forEach(b => b.onclick = async () => {
+      b.disabled = true;
+      try { await post('/rarity', { slug: b.dataset.tip, rarete: b.dataset.r }); if (S.cr?.slug === b.dataset.tip) refresh(await get('/creature?slug=' + encodeURIComponent(b.dataset.tip))); loadBalance(); }
+      catch (e) { b.disabled = false; say(e.message, true); }
+    });
   }
 
   // ------------------------------------------------------------ démarrage

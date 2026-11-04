@@ -5,9 +5,10 @@ Le texte de l'utilisateur part tel quel (l'encodeur Qwen3 comprend le français)
 pondérations, pas de négatifs imposés. FLUX.2 klein sait aussi éditer à partir d'images de référence
 (ReferenceLatent) : c'est ce qui fait tourner la créature et l'anime en gardant son design.
 """
+import math
 import uuid
 
-from PIL import Image, ImageOps
+from PIL import Image, ImageChops, ImageOps
 
 import nb_archetypes
 import nb_auto
@@ -93,10 +94,44 @@ POSE = {
     "vole": "It hovers in mid-air on its wings, above the ground.",
     "rampe": "Its long body lies flat on the ground and slithers along it, belly on the ground.",
     "nage": "It swims, floating in the water with its fins, its body ending in a tail.",
+    "sautille": "It crouches on its strong hind legs, ready to leap, like a frog or a hare.",
+    "roule": "Its body is a compact ball, curled up round, ready to roll along the ground.",
+    "glisse": "It is a soft, gooey mass resting on the ground, a low dome with no legs, that slides along.",
+    "enracine": "It is rooted in the ground: its base spreads into roots or a stump planted in the soil, it does not walk.",
 }
+# au profil, le modèle ne voit que la face : on lui dit à quoi ressemble la silhouette de côté, posture par posture
+PROFILE = {
+    "quatre_pattes": (" Its body is horizontal: head at the left, rump and tail at the right, the four legs under the body "
+                      "(the two near legs in front of the two far ones). The side view is wider than tall."),
+    "deux_jambes": " It stands upright, seen from its side, one leg slightly ahead of the other, arms along its body.",
+    "plusieurs_pattes": " Its body is horizontal, head at the left, and its legs are spread in a row along its side, all under the body.",
+    "flotte": " It hovers well above the ground, with empty space under it, seen from the side.",
+    "vole": " Its wings are spread and raised above its back, seen from the side, and it hovers above the ground.",
+    "rampe": (" Its long body is stretched out flat along the ground, from its head at the left to the tip of its tail at the "
+              "right, low and horizontal, slightly wavy: it does not stand up, rear up or coil upward. The side view is much "
+              "wider than tall."),
+    "nage": (" Its body is horizontal like a fish seen from the side: head at the left, tail fin at the right, fins along "
+             "its belly and back. The side view is wider than tall."),
+    "sautille": " It crouches, seen from the side, its big folded hind legs under its body, ready to leap toward the left.",
+    "roule": " Seen from the side it is the same compact ball, round, sitting on the ground.",
+    "glisse": " Seen from the side it is a low soft dome lying on the ground, wider than tall, sliding toward the left.",
+    "enracine": " Seen from the side it is still rooted in the ground, its top leaning slightly toward the left.",
+}
+WIDE = {"quatre_pattes", "plusieurs_pattes", "rampe", "nage", "glisse"}  # profil plus large que haut, sinon mauvais profil
 FLOATING = {"flotte", "vole", "nage"}
 _GUESS = (("flotte", r"flott|levit|dans les airs|en l.air|plane\b|suspendu"), ("vole", r"\bvol(e|ant)\b"),
-          ("rampe", r"rampe|serpent|\bver\b|limace|anguille"), ("nage", r"\bnage|poisson"))
+          ("rampe", r"\bramp(e|ant)|serpent|\bver\b|limace|anguille|mille.pattes"), ("nage", r"\bnage|poisson"),
+          ("glisse", r"gelee|slime|\bblob|visqueu|glisse"), ("sautille", r"saute|sautill|bondi|grenouille|lievre|lapin|kangourou"),
+          ("roule", r"\broule|en boule|boule roulante"), ("enracine", r"enracin|racines|souche|arbre vivant"))
+
+
+LEGLESS = {"flotte", "rampe", "nage", "glisse", "roule"}
+
+
+def said_posture(description):
+    """La posture écrite en toutes lettres dans la description (« rampante », « qui flotte »), ou ""."""
+    folded = nb_core.fold(description)
+    return next((p for p, rx in _GUESS if nb_core.re.search(rx, folded)), "")
 
 
 def guess_brief(description):
@@ -153,6 +188,7 @@ def view_prompt(direction, legs=False, brief=None, description=""):
     b = brief or {}
     head = f"The creature: {describe(description, b)}\n" if (b.get("en") or description.strip()) else ""
     side = f" Seen from the side: {b['profil']}" if direction == "gauche" and b.get("profil") else ""
+    side += PROFILE.get(b.get("posture"), "") if direction == "gauche" else ""
     known = b.get("posture") in POSE
     facing = FACING[direction].replace("{posture}", "" if known else GUESSED_POSTURE)
     walks = legs or not known  # posture inconnue : on garde les pattes dans la liste, comme avant
@@ -253,10 +289,54 @@ def _flat(im):
     return bg
 
 
+def clean_cut(im):
+    """Finit le détourage de BiRefNet : bord net, plus de liseré du fond gris, plus de miettes détachées (restes du
+    fond, étincelles). Les trous ne sont pas bouchés : un vide entre l'aile et la queue est souvent un vrai vide."""
+    import numpy as np
+    from scipy import ndimage
+    im = im.convert("RGBA")
+    arr = np.asarray(im).astype(np.float32)
+    rgb, a = arr[..., :3].copy(), arr[..., 3].copy()
+    if (a >= 200).sum() < 50:
+        return im
+    clear = a < 16
+    bg = np.median(rgb[clear], axis=0) if clear.sum() > 100 else np.array([200., 200., 200.])
+    a[a < 48] = 0
+    body = a > 0
+    # liseré : pixels du bord (2 px) de la couleur du fond
+    rim = body & ~ndimage.binary_erosion(body, iterations=2)
+    a[rim & (np.abs(rgb - bg).max(axis=2) < 14)] = 0
+    body = a > 0
+    # miettes : tout morceau détaché minuscule, ou un petit morceau gris clair comme le fond
+    lab, n = ndimage.label(body)
+    if n > 1:
+        sizes = ndimage.sum(body, lab, range(1, n + 1))
+        big = sizes.max()
+        for i, size in enumerate(sizes, 1):
+            if size >= big:
+                continue
+            part = lab == i
+            col = rgb[part].mean(axis=0)
+            if size < big * .004 or (size < big * .05 and np.abs(col - bg).max() < 30):
+                a[part] = 0
+        body = a > 0
+    a[a >= 230] = 255
+    # bord : les pixels semi-transparents prennent la couleur de l'intérieur voisin, pas celle du fond
+    solid = (a == 255).astype(np.float32)
+    edge = (a > 0) & (a < 255) & ~ndimage.binary_erosion(a > 0, iterations=3)  # le bord seulement : ailes translucides gardées
+    w = ndimage.gaussian_filter(solid, 2)
+    c = np.stack([ndimage.gaussian_filter(rgb[..., k] * solid, 2) for k in range(3)], axis=2)
+    fix = edge & (w > .05)
+    rgb[fix] = c[fix] / w[fix][:, None]
+    out = np.dstack([rgb, a]).clip(0, 255).astype(np.uint8)
+    return Image.fromarray(out, "RGBA")
+
+
 def render(client, model, prompt, seed, refs_img=(), cancel=lambda: False, **kw):
     refs = [client.upload_png(_flat(im), f"eref_{uuid.uuid4().hex[:8]}.png") for im in refs_img]
     g = build_graph(model, prompt, seed, refs=refs, **kw)
-    return nbc.run_workflow(client, g, cancel, mode="RGBA" if kw.get("cut") else "RGB")
+    im = nbc.run_workflow(client, g, cancel, mode="RGBA" if kw.get("cut") else "RGB")
+    return clean_cut(im) if kw.get("cut") else im
 
 
 def edit_prompt(instruction, zone):
@@ -318,6 +398,21 @@ def generate_portrait(client, design, move, seed, progress=lambda m: None, cance
     return render(client, MODEL, portrait_prompt(move, brief, description), seed, refs_img=[design], cancel=cancel, cut=True)
 
 
+def illustration_prompt(brief=None, description=""):
+    return ("A bestiary illustration of this exact creature, like a plate in a naturalist's field guide: the creature "
+            "calm, in its natural and most characteristic posture, seen at a three-quarter angle, its whole body and every "
+            "part clearly visible and readable, nothing hidden or cropped, large and centered. "
+            "Keep the identical design, colors, anatomy (same number of heads, eyes, legs, wings, horns, tentacles) and "
+            f"pixel art style. The creature: {describe(description, brief)} "
+            "Detailed pixel art, plain flat light gray background, no text, no scenery, no cast shadow.")
+
+
+def generate_illustration(client, design, seed, progress=lambda m: None, cancel=lambda: False, brief=None, description=""):
+    """L'image du bestiaire : la créature au calme, entière et fidèle à sa description, d'après son design."""
+    progress("Image du bestiaire")
+    return render(client, MODEL, illustration_prompt(brief, description), seed, refs_img=[design], cancel=cancel, cut=True)
+
+
 def fusion_prompt(description, brief=None):
     return ("Combine the two reference creatures into ONE single new hybrid creature that clearly mixes visible traits "
             f"of both. {STYLE} The hybrid: {describe(description, brief)} {pose_line(brief)}")
@@ -361,7 +456,7 @@ def score_view(im, ref, direction):
 def has_legs(description, brief=None):
     """La marche par édition de pose n'a de sens qu'avec des pattes ; sinon (œil, blob, serpent) : rebond."""
     if brief and brief.get("posture"):
-        return brief["posture"] not in FLOATING | {"rampe"} and brief.get("pattes", 0) > 0
+        return brief["posture"] not in FLOATING | {"rampe", "glisse", "roule"} and brief.get("pattes", 0) > 0
     spec = nb_core.analyze("", description)
     if spec.only or "legs" in spec.forbidden or "body" in spec.forbidden:
         return False
@@ -408,7 +503,16 @@ def flap(im, direction, phase):
     return out
 
 
-def _best(client, prompt, refs, direction, seed, tries, cancel, progress, label):
+def shape_penalty(im, direction, posture):
+    """Un serpent ou un quadrupède de profil est plus large que haut : un profil dressé est un raté."""
+    box = im.getbbox()
+    if direction != "gauche" or posture not in WIDE or not box:
+        return 0.0
+    w, h = box[2] - box[0], box[3] - box[1]
+    return 0.0 if w >= h * 1.1 else 8.0
+
+
+def _best(client, prompt, refs, direction, seed, tries, cancel, progress, label, posture=""):
     """refs[0] = le design (sert aussi à noter les couleurs)."""
     ref = refs[0]
     cands = []
@@ -417,7 +521,7 @@ def _best(client, prompt, refs, direction, seed, tries, cancel, progress, label)
             raise nbc.ComfyError("annulé")
         progress(f"{label} ({i + 1}/{tries})")
         im = render(client, MODEL, prompt, seed + 1000 * i, refs_img=refs, cancel=cancel, cut=True)
-        cands.append((score_view(im, ref, direction), im))
+        cands.append((score_view(im, ref, direction) - shape_penalty(im, direction, posture), im))
     cands.sort(key=lambda c: -c[0])
     return [im for _, im in cands]
 
@@ -437,7 +541,7 @@ def generate_directions(client, design, seed, progress=lambda m: None, cancel=la
     # sans pattes (œil, pieuvre) : face + dos, sinon le modèle invente un corps à quatre pattes en tournant de 90°
     refs = [design] if legs else [design, out["haut"][0]]
     out["gauche"] = _best(client, view_prompt("gauche", legs, brief, description), refs, "gauche", seed + 7, tries, cancel,
-                          progress, "Profil")
+                          progress, "Profil", (brief or {}).get("posture", ""))
     out["droite"] = [ImageOps.mirror(im) for im in out["gauche"]]
     return out
 
@@ -450,7 +554,8 @@ def generate_view(client, refs, direction, seed, progress=lambda m: None, cancel
         refs = refs[:1]
     if direction == "haut":  # vu de dos, la gauche et la droite s'échangent : le bâton tenu à gauche passe à droite
         refs = [ImageOps.mirror(refs[0])]
-    return _best(client, view_prompt(direction, legs, brief, description), refs, direction, seed, 1, cancel, progress, label)[0]
+    return _best(client, view_prompt(direction, legs, brief, description), refs, direction, seed, 1, cancel, progress, label,
+                 (brief or {}).get("posture", ""))[0]
 
 
 def leg_zone(im):
@@ -523,17 +628,129 @@ def step_frame(im, direction, phase):
     return out
 
 
+def _rows(im, shift):
+    """Chaque ligne y décalée de shift(y) px à l'horizontale."""
+    out = Image.new("RGBA", im.size, (0, 0, 0, 0))
+    for y in range(im.height):
+        row = im.crop((0, y, im.width, y + 1))
+        out.paste(row, (shift(y), y), row)
+    return out
+
+
+def _cols(im, shift):
+    """Chaque colonne x décalée de shift(x) px à la verticale."""
+    out = Image.new("RGBA", im.size, (0, 0, 0, 0))
+    for x in range(im.width):
+        col = im.crop((x, 0, x + 1, im.height))
+        out.paste(col, (x, shift(x)), col)
+    return out
+
+
+def wave(im, direction, phase, amp=.04, waves=1.5):
+    """Ondulation (serpent, ver, poisson) : une vague parcourt le corps, nulle à la tête, ample vers la queue.
+    Face / dos : balancement de gauche à droite ; profil (tête à gauche) : le corps ondule de haut en bas."""
+    im = im.convert("RGBA")
+    box = im.getbbox()
+    if not box or not phase:
+        return im.copy()
+    x0, y0, x1, y1 = box
+    w, h = x1 - x0, y1 - y0
+    a = max(2, round(max(w, h) * amp))  # d'après la longueur : un serpent couché est très plat
+    off = phase * math.pi / 2
+    if direction in ("bas", "haut"):
+        def shift(y):
+            t = (y - y0) / max(1, h)
+            ramp = 1 - t if direction == "bas" else t  # la tête est devant : en bas de face, en haut de dos
+            return round(a * ramp * math.sin(2 * math.pi * waves * t + off))
+        return _rows(im, shift)
+
+    def shift(x):
+        t = (x - x0) / max(1, w)
+        return round(a * t * math.sin(2 * math.pi * waves * t + off))
+    return _cols(im, shift)
+
+
+def swim(im, direction, phase):
+    return wave(im, direction, phase, amp=.03, waves=.75)
+
+
+def _rescale(im, sx, sy):
+    """La créature étirée (sx, sy), posée au même endroit (bas et centre gardés)."""
+    box = im.getbbox()
+    if not box:
+        return im.copy()
+    part = im.crop(box)
+    nw, nh = max(1, round(part.width * sx)), max(1, round(part.height * sy))
+    part = part.resize((nw, nh), Image.Resampling.NEAREST)
+    out = Image.new("RGBA", im.size, (0, 0, 0, 0))
+    out.paste(part, ((box[0] + box[2]) // 2 - nw // 2, box[3] - nh), part)
+    return out
+
+
+def hop(im, direction, phase):
+    """Bond : +1 accroupi (tassé, élargi), -1 en extension (étiré, aminci)."""
+    return _rescale(im, 1.06, .9) if phase > 0 else _rescale(im, .95, 1.08) if phase < 0 else im.copy()
+
+
+def jelly(im, direction, phase):
+    """Gelée : elle s'étale puis se resserre en glissant."""
+    return _rescale(im, 1.08, .92) if phase > 0 else _rescale(im, .96, 1.05) if phase < 0 else im.copy()
+
+
+def roll(im, direction, phase):
+    """Boule : de profil elle tourne sur elle-même ; de face et de dos, sa surface défile dans sa silhouette."""
+    im = im.convert("RGBA")
+    box = im.getbbox()
+    if not box or not phase:
+        return im.copy()
+    cx, cy = (box[0] + box[2]) / 2, (box[1] + box[3]) / 2
+    if direction not in ("bas", "haut"):
+        return im.rotate(25 * phase, Image.Resampling.NEAREST, center=(cx, cy))
+    part = im.crop(box)
+    k = max(1, round(part.height * .12)) * phase
+    rgb = ImageChops.offset(part, 0, k)  # la texture défile (en boucle), la silhouette reste
+    rgb.putalpha(part.getchannel("A"))
+    out = Image.new("RGBA", im.size, (0, 0, 0, 0))
+    out.paste(rgb, box[:2], rgb)
+    return out
+
+
+def sway(im, direction, phase):
+    """Plante ou créature enracinée : le haut se balance, la base reste plantée."""
+    im = im.convert("RGBA")
+    box = im.getbbox()
+    if not box or not phase:
+        return im.copy()
+    x0, y0, x1, y1 = box
+    base = y0 + (y1 - y0) * .65
+    a = max(2, round((x1 - x0) * .06))
+    return _rows(im, lambda y: round(phase * a * (base - y) / max(1, base - y0)) if y < base else 0)
+
+
+MOTION = {"rampe": wave, "nage": swim, "sautille": hop, "roule": roll, "glisse": jelly, "enracine": sway}
+
+
+def motion(description, brief=None):
+    """Le mouvement procédural de la créature, f(image, direction, phase), ou None (elle marche sur ses pattes)."""
+    p = (brief or {}).get("posture")
+    if has_wings(description, brief) and (p in FLOATING or not has_legs(description, brief)):
+        return flap
+    if p in MOTION:
+        return MOTION[p]
+    if not has_legs(description, brief):
+        # le décalage de hover() disparaît quand les sprites sont alignés en bas : il faut une forme qui change
+        return lambda im, d, ph: bob(im, ph)
+    return None
+
+
 def generate_walk(client, view, direction, description, seed, progress=lambda m: None, cancel=lambda: False, brief=None):
     """3 images : pas A, repos, pas B (lecture A, repos, B, repos). droite : miroir de la marche gauche.
 
     Les pas sont calculés depuis la pose de repos (pas redessinés par le modèle) : les pattes restent nettes et la
     créature identique d'une image à l'autre. Sans pattes (œil, blob, serpent) : rebond."""
-    flies = (brief or {}).get("posture") in FLOATING
-    if has_wings(description, brief) and (flies or not has_legs(description, brief)):
-        return [flap(view, direction, 1), view.copy(), flap(view, direction, -1)]
-    if not has_legs(description, brief):
-        # le décalage de hover() disparaît quand les sprites sont alignés en bas : il faut une forme qui change
-        return [bob(view, 1), view.copy(), bob(view, -1)]
+    move = motion(description, brief)
+    if move:
+        return [move(view, direction, 1), view.copy(), move(view, direction, -1)]
     return [step_frame(view, direction, 1), view.copy(), step_frame(view, direction, -1)]
 
 

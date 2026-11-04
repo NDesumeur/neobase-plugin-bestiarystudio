@@ -13,6 +13,17 @@ def guess_brief(description):
                 en="", profil="")
 
 
+LEGLESS = {"flotte", "rampe", "nage", "glisse", "roule"}
+
+
+def motion(description, brief=None):
+    return None
+
+
+def said_posture(description):
+    return "rampe" if "rampante" in description else ""
+
+
 def has_legs(description, brief=None):
     if brief:
         return brief.get("pattes", 0) > 0
@@ -107,12 +118,31 @@ def vision_model():
     return "factice"
 
 
+MATCHES = []  # notes imposées par le test
+
+
+def match(images, text, keep_alive=0):
+    return [MATCHES.pop(0) if MATCHES else dict(score=7, missing=[]) for _ in images]
+
+
+def generate_illustration(client, design, seed, progress=lambda m: None, cancel=lambda: False, brief=None, description=""):
+    progress("Image du bestiaire")
+    out = Image.new("RGBA", (512, 512), (0, 0, 0, 0))
+    ImageDraw.Draw(out).ellipse((100, 80, 420, 470), fill=(90 + seed % 100, 160, 90, 255))
+    return out
+
+
 def look(images, keep_alive=0):
     return [LOOKS.pop(0) if LOOKS else {"heads": 1, "eyes": 2, "legs": 4} for _ in images]
 
 
 def lore(name, description, seed=1):
     return dict(type="poison", espece="la créature Test", taille="1 m", poids="10 kg", habitat="Les marais.",
-                description=description, histoire=f"On raconte que {name} existe.", menace=3,
+                description=description, histoire=f"On raconte que {name} existe.", menace=3, prestige=PRESTIGE[0],
                 attaques=[dict(nom="Morsure", genre="morsure", element="poison", description="Elle mord."),
+                          dict(nom="Fouet", genre="fouet", element="poison", description="Elle fouette."),
+                          dict(nom="Soin", genre="soin", element="plante", description="Elle se soigne."),
                           dict(nom="Crachat", genre="projectile", element="poison", description="Elle crache.")])
+
+
+PRESTIGE = [50]  # imposé par le test

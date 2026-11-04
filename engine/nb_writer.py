@@ -129,7 +129,8 @@ def fuse(a, b, seed=None):
     return dict(name=name or a["name"][:len(a["name"]) // 2] + b["name"][len(b["name"]) // 2:], description=desc)
 
 
-POSTURES = ("quatre_pattes", "deux_jambes", "plusieurs_pattes", "flotte", "vole", "rampe", "nage")
+POSTURES = ("quatre_pattes", "deux_jambes", "plusieurs_pattes", "flotte", "vole", "rampe", "nage", "sautille", "roule",
+            "glisse", "enracine")
 SYS_BRIEF = (
     "Tu es directeur artistique pour un jeu vidéo : tu prépares la consigne d'un générateur d'images à partir d'une "
     "créature décrite en français. Tu connais très bien les monstres et créatures des jeux de rôle, de la mythologie, "
@@ -169,7 +170,11 @@ def brief(description, seed=1):
                  f"autrement) :{known}\n" if known else "")
               + "\nRéponds en JSON avec exactement ces clés :\n"
               f"\"posture\" (un seul mot parmi : {', '.join(POSTURES)} ; « flotte » si elle lévite ou flotte dans les airs "
-              "sans toucher le sol, « rampe » pour un serpent, un ver ou une limace, « nage » pour un poisson),\n"
+              "sans toucher le sol, « vole » si elle se déplace en volant avec des ailes, « rampe » pour un serpent, un ver, "
+              "un mille-pattes ou toute créature dite rampante, « nage » pour un poisson, « sautille » si elle avance par "
+              "bonds (grenouille, lièvre), « roule » pour une boule qui roule, « glisse » pour une gelée ou une masse molle "
+              "sans pattes, « enracine » pour une plante ou un arbre planté dans le sol ; si la description dit comment elle "
+              "se déplace, c'est cette posture),\n"
               "\"pattes\" (le nombre de pattes ou de jambes qui touchent le sol, 0 si elle n'en a pas ; les tentacules, "
               "bras et ailes ne comptent pas),\n"
               "\"silhouette\" (en anglais, quelques mots : ce qu'elle est dans l'ensemble, ex. « a three-headed ghoul "
@@ -197,7 +202,7 @@ def brief(description, seed=1):
     ref_posture = next((p for p, _ in refs if p), None)
     if ref_posture and not nb_archetypes.says_posture(description):  # le tyrannœil flotte, même si la plume hésite
         posture = ref_posture
-    if posture in ("flotte", "rampe", "nage"):
+    if posture in ("flotte", "rampe", "nage", "glisse", "roule"):
         legs = 0
     return dict(posture=posture, pattes=legs, en=en, silhouette=_clean(out.get("silhouette"), 120),
                 anatomie=_anatomy(out.get("anatomie")), profil=_clean(out.get("profil"), 300))
@@ -252,6 +257,48 @@ def look(images, keep_alive=0):
     return out
 
 
+MATCH = ("Here is the description of a creature: {text}\nLook at the picture. Does it show exactly this creature? "
+         "Check every part (number of heads, eyes, legs, wings, tails, horns, tentacles), the colors and the posture. "
+         "Answer in JSON: {{\"score\": integer from 0 (not this creature) to 10 (exactly this creature), "
+         "\"missing\": [short list, in French, of what is missing or wrong]}}.")
+
+
+def match(images, text, keep_alive=0):
+    """Ressemblance de chaque image à la description, par le modèle de vision : [{"score": 0..10, "missing": [...]}]."""
+    import base64
+    import io
+    m = vision_model()
+    if not m:
+        return []
+    out = []
+    for k, im in enumerate(images):
+        im = im.convert("RGBA")
+        from PIL import Image
+        bg = Image.new("RGB", im.size, (200, 200, 200))
+        bg.paste(im, mask=im.getchannel("A"))
+        box = im.getbbox() or (0, 0, *im.size)
+        bg = bg.crop(box).resize((448, 448))
+        buf = io.BytesIO()
+        bg.save(buf, "PNG")
+        body = {"model": m, "prompt": MATCH.format(text=text), "images": [base64.b64encode(buf.getvalue()).decode()],
+                "format": "json", "stream": False, "think": False, "options": {"temperature": 0, "num_predict": 160},
+                "keep_alive": keep_alive if k == len(images) - 1 else "2m"}
+        req = urllib.request.Request(OLLAMA + "/api/generate", data=json.dumps(body).encode(),
+                                     headers={"Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=300) as r:
+                got = json.loads(json.loads(r.read())["response"])
+        except Exception as exc:
+            raise WriterError(f"Le modèle de vision n'a pas répondu ({exc}).")
+        try:
+            score = max(0, min(10, int(got.get("score", 0))))
+        except (TypeError, ValueError):
+            score = 0
+        missing = [_clean(x, 60) for x in (got.get("missing") or []) if isinstance(x, str)][:4]
+        out.append(dict(score=score, missing=missing))
+    return out
+
+
 def lore(name, description, seed=1):
     """Fiche façon Pokédex : type, espèce, taille, poids, habitat, description, histoire."""
     prompt = (f"Créature : « {name} » — {description}\n\nRédige sa fiche en JSON avec exactement ces clés :\n"
@@ -261,19 +308,32 @@ def lore(name, description, seed=1):
               "\"description\" (2 phrases, comme un naturaliste qui l'a observée : son allure ET son comportement "
               "(ce qu'elle mange, comment elle chasse ou se cache), avec tes propres mots ; ne recopie pas la description),\n"
               "\"histoire\" (2 ou 3 phrases : une légende, une croyance ou une anecdote, façon Pokédex),\n"
-              "\"menace\" (entier de 1 à 5 : 1 = inoffensive, 3 = dangereuse, 5 = fléau d'une région ; sois juste, "
-              "la plupart des créatures valent 2 ou 3),\n"
-              f"\"attaques\" (exactement 2 attaques qu'elle utilise vraiment, d'après son corps : la 1re rapide, la 2e "
-              f"sa plus forte. Chacune : {{\"nom\": nom court en français, \"genre\": un mot parmi {', '.join(nb_stats.GENRES)}, "
-              f"\"element\": un mot parmi {', '.join(TYPES)}, \"description\": une phrase}}).")
+              "\"menace\" (entier de 1 à 5 : 1 = inoffensive, 3 = dangereuse, 5 = fléau d'une région),\n"
+              "\"prestige\" (entier de 0 à 100 : à quel point elle impressionne un joueur qui la croise. 10 = bestiole "
+              "ordinaire (rat, crapaud, petit insecte), 30 = animal un peu étrange, 50 = bête dangereuse, 70 = monstre "
+              "redoutable (golem géant, hydre, chimère), 90 et plus = légende (dragon ancien, divinité, titan). Tiens "
+              "compte de sa taille, de son nombre de têtes ou d'yeux, de ses pouvoirs et de son côté mythique ; ne "
+              "mets pas 50 par défaut),\n"
+              f"\"attaques\" (exactement 4 attaques qu'elle utilise vraiment, d'après son corps et son type, de la plus "
+              f"faible à la plus forte, chacune d'un genre différent, et toutes bien différentes les unes des autres. "
+              f"Genres possibles : {'; '.join(f'{g} = {d}' for g, d in nb_stats.GENRE_FR.items())}. Choisis-les d'après "
+              f"ce qu'elle a vraiment : queue -> fouet, cornes -> corne, dard -> dard, tentacules -> etreinte, ailes -> "
+              f"rafale, gueule -> morsure ou cri. Au moins une au contact et une à distance ou autour d'elle ; au plus "
+              f"une de soutien (soin ou renfort), jamais la première ni la dernière. Chacune : {{\"nom\": nom court et "
+              f"évocateur en français, \"genre\": un mot parmi {', '.join(nb_stats.GENRES)}, \"element\": un mot parmi "
+              f"{', '.join(TYPES)}, \"description\": une phrase qui décrit le geste}}).")
     out = _ask(SYS_LORE, prompt, seed)
     fiche = {k: _clean(out.get(k)) for k in ("type", "espece", "taille", "poids", "habitat", "description", "histoire")}
     t = fiche["type"].lower()
     fiche["type"] = t if t in TYPES else next((x for x in TYPES if x in t), "esprit")
     fiche["menace"] = out.get("menace", 3)
+    try:
+        fiche["prestige"] = max(0, min(100, int(out.get("prestige"))))
+    except (TypeError, ValueError):
+        pass  # sans prestige : rareté tirée au sort, comme avant
     fiche["attaques"] = [dict(nom=_clean(a.get("nom"), 40), genre=_clean(a.get("genre"), 20).lower(),
                               element=_clean(a.get("element"), 20).lower(), description=_clean(a.get("description"), 200))
-                         for a in (out.get("attaques") or []) if isinstance(a, dict)][:2]
+                         for a in (out.get("attaques") or []) if isinstance(a, dict)][:4]
     if not fiche["description"] or not fiche["histoire"]:
         raise WriterError("La fiche est incomplète, réessaie.")
     return fiche

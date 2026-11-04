@@ -96,8 +96,11 @@ def blink(im, comps=None):
     return out
 
 
-def idle(rest):
+def idle(rest, direction="bas", move=None):
+    """move(image, direction, phase) : une créature qui ne tient pas en place (ailes, ondulation) bouge aussi à l'arrêt."""
     rest = rest.convert("RGBA")
+    if move:
+        return [move(rest, direction, 1), rest.copy(), move(rest, direction, -1), blink(rest)]
     return [rest.copy(), breathe(rest), rest.copy(), blink(rest)]
 
 
@@ -160,9 +163,9 @@ def ko(rest, direction):
     return [tilt, fall, down, gone]
 
 
-def build(rest, direction):
+def build(rest, direction, move=None):
     """{nom: [images 64x64]} pour une direction."""
-    return {"attente": idle(rest), "degats": hurt(rest, direction), "ko": ko(rest, direction)}
+    return {"attente": idle(rest, direction, move), "degats": hurt(rest, direction), "ko": ko(rest, direction)}
 
 
 if __name__ == "__main__":  # auto-test : une créature ronde avec deux yeux
