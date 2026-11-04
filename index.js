@@ -21,6 +21,7 @@ const HTML = `<link rel="stylesheet" href="${U}ui/studio.css">
     <button class="nbs-tab" data-p="dirs">${ic('directions')}Directions</button>
     <button class="nbs-tab" data-p="lab">${ic('lab')}Sprite Lab</button>
     <button class="nbs-tab" data-p="lib">${ic('biblio')}Bibliothèque</button>
+    <button class="nbs-tab" data-p="eq">${ic('balance')}Équilibre</button>
   </nav>
   <main class="nbs-frame">
     <section class="nbs-page" id="p-setup">
@@ -85,13 +86,28 @@ const HTML = `<link rel="stylesheet" href="${U}ui/studio.css">
         <span class="nbs-hint" id="dirHint">Clique une image puis ◀ ▶ pour changer sa version.</span>
       </div>
       <div class="nbs-sep"></div>
+      <div class="nbs-title">Variantes de couleur</div>
+      <div class="nbs-row nbs-themes" id="forms"></div>
+      <div class="nbs-row" style="margin-top:8px">
+        <div class="nbs-parch"><select id="varSel"></select></div>
+        <button class="nbs-btn dark" id="varAdd">${ic('etoile')}Créer la variante</button>
+        <span class="nbs-hint" id="varMsg">La même créature repeinte, au pixel près. Chromatique : un cran de rareté de plus ; élément : elle en prend le type.</span>
+      </div>
+      <div class="nbs-sep"></div>
       <div class="nbs-title">Attaques</div>
       <div id="attacks"></div>
+      <div class="nbs-sep"></div>
+      <div class="nbs-title">Animations de combat</div>
+      <div id="anims"></div>
       <div class="nbs-sep"></div>
       <div class="nbs-title">Fiche du bestiaire</div>
       <div class="nbs-parch nbs-fiche" id="fiche"></div>
       <div class="nbs-row" style="margin-top:8px">
         <button class="nbs-btn dark" id="relore">${ic('refaire')}Réécrire la fiche</button>
+        <button class="nbs-btn dark" id="portraitRedo">${ic('crayon')}Refaire le portrait</button>
+        <button class="nbs-btn dark sq" id="pPrev" title="Portrait précédent">${ic('prev')}</button>
+        <span class="nbs-num" id="pVer">—</span>
+        <button class="nbs-btn dark sq" id="pNext" title="Portrait suivant">${ic('next')}</button>
         <span class="nbs-hint" id="loreMsg"></span>
       </div>
     </section>
@@ -147,9 +163,19 @@ const HTML = `<link rel="stylesheet" href="${U}ui/studio.css">
     <section class="nbs-page" id="p-lib">
       <div class="nbs-row" style="margin-bottom:12px">
         <div class="nbs-parch" style="flex:1"><input type="text" id="q" placeholder="Chercher une créature…" spellcheck="false"></div>
+        <button class="nbs-btn dark" id="fuseBtn" title="Inventer l'hybride de deux créatures">${ic('etoile')}Fusionner</button>
         <button class="nbs-btn dark" id="openExports" title="Les créatures exportées, prêtes pour le bestiaire">${ic('dossier')}Exports</button>
       </div>
+      <div class="nbs-row nbs-fusebar" id="fuseBar" hidden>
+        <span class="nbs-hint" id="fuseMsg">Choisis deux créatures finies.</span>
+        <button class="nbs-btn go" id="fuseGo" disabled>${ic('play')}Fusionner ces deux</button>
+        <button class="nbs-btn dark" id="fuseStop">Annuler</button>
+      </div>
       <div class="nbs-lib" id="lib"></div>
+    </section>
+
+    <section class="nbs-page" id="p-eq">
+      <div id="eq"><div class="nbs-hint">Lecture du bestiaire…</div></div>
     </section>
   </main>
   <div class="nbs-modal" id="retouch" hidden>
@@ -196,6 +222,7 @@ export default async function (ctx) {
     $$('.nbs-tab').forEach(t => t.classList.toggle('on', t.dataset.p === p));
     $$('.nbs-page').forEach(x => x.classList.toggle('on', x.id === 'p-' + p));
     if (p === 'lib') loadLib();
+    if (p === 'eq') loadBalance();
     if (p === 'lab') loadFrame();
   };
   $$('.nbs-tab').forEach(t => t.onclick = () => show(t.dataset.p));
@@ -260,7 +287,8 @@ export default async function (ctx) {
     });
     busy(false);
     if (j.error) { say(j.error, true); return null; }
-    say(j.kind === 'sketch' ? 'Choisis ton design ↓' : j.kind === 'edit' ? 'Retouche faite ✓ (nouvelle version)' : 'Créature invoquée ✓');
+    say(j.kind === 'sketch' ? 'Choisis ton design ↓' : j.kind === 'edit' ? 'Retouche faite ✓ (nouvelle version)'
+      : j.kind === 'portrait' ? 'Portrait de combat prêt ✓ (onglet Directions, fiche)' : 'Créature invoquée ✓');
     get('/status').then(status).catch(() => {});
     if (j.slug) await open(j.slug);
     return j;
@@ -297,17 +325,51 @@ export default async function (ctx) {
     b.disabled = false;
   };
 
+  // ------------------------------------------------------------ forme affichée : la créature ou une de ses variantes
+  const form = () => S.cr?.forms?.find(f => f.id === S.form) || S.cr?.forms?.[0] ||
+    { id: 'base', nom: S.cr?.name, dossier: 'sprites/', fx: S.cr?.attack_fx || {}, combat: S.cr?.lore?.combat };
+  function renderForms() {
+    const box = $('#forms'), sel = $('#varSel');
+    if (!S.cr?.forms?.length) { box.innerHTML = '<span class="nbs-hint">Les variantes arrivent avec la fiche de combat.</span>'; sel.innerHTML = ''; return; }
+    if (!S.cr.forms.some(f => f.id === S.form)) S.form = 'base';
+    box.innerHTML = S.cr.forms.map(f => `<span class="nbs-form${f.id === S.form ? ' on' : ''}" data-f="${esc(f.id)}">
+      <img src="${src(f.dossier + 'bas_repos.png')}" alt=""><b>${esc(f.id === 'base' ? 'Originale' : f.nom.slice(S.cr.name.length + 1))}</b>
+      <span class="nbs-rare r${RAR.indexOf(f.combat.rarete)}">${esc(f.combat.rarete)}</span>
+      ${f.id === 'base' ? '' : `<button class="nbs-btn red sq" data-rm="${esc(f.id)}" title="Supprimer la variante">${ic('corbeille')}</button>`}</span>`).join('');
+    const have = new Set(S.cr.variants || []);
+    sel.innerHTML = (S.cr.variant_choices || []).filter(v => !have.has(v.id)).map(v => `<option value="${esc(v.id)}">${esc(v.id === 'chromatique' ? 'chromatique (rare)' : v.label)}</option>`).join('');
+    $$('#forms .nbs-form').forEach(el => el.onclick = async e => {
+      const rm = e.target.closest('[data-rm]');
+      if (rm) {
+        e.stopPropagation();
+        try { refresh(await post('/variant-remove', { slug: S.cr.slug, variant: rm.dataset.rm })); } catch (err) { $('#varMsg').textContent = err.message; }
+        return;
+      }
+      S.form = el.dataset.f; renderForms(); renderFiche(); renderAttacks(); renderAnims();
+    });
+  }
+  $('#varAdd').onclick = async () => {
+    const v = $('#varSel').value;
+    if (!v || !S.cr) return;
+    $('#varMsg').textContent = 'Peinture de la variante…';
+    try { S.form = v; refresh(await post('/variant', { slug: S.cr.slug, variant: v })); $('#varMsg').textContent = 'Variante prête ✓'; }
+    catch (e) { $('#varMsg').textContent = e.message; }
+  };
+  const RAR = ['commun', 'peu commun', 'rare', 'épique', 'légendaire'];
+
   // ------------------------------------------------------------ fiche
   function renderFiche() {
-    const f = S.cr?.lore, box = $('#fiche');
+    const f = S.cr?.lore, box = $('#fiche'), F = form();
     if (!S.cr) { box.innerHTML = '<div class="nbs-hint">Aucune créature ouverte.</div>'; return; }
-    const pic = sprite('bas', 'repos');
-    box.innerHTML = f ? `<div class="nbs-fiche-top">${pic ? `<div class="nbs-fiche-pic nbs-well"><img src="${pic}" alt=""></div>` : ''}
-      <div><div class="nbs-fiche-head"><b>${esc(S.cr.name)}</b><span class="nbs-type">${esc(f.type)}</span></div>
+    const big = S.cr.portrait ? src(F.dossier + 'portrait.png') : '', pic = big || src(F.dossier + 'bas_repos.png');
+    const pv = S.cr.portrait_version || [0, 0];
+    $('#pVer').textContent = pv[1] ? `${pv[0]} / ${pv[1]}` : '—';
+    box.innerHTML = f ? `<div class="nbs-fiche-top">${pic ? `<div class="nbs-fiche-pic nbs-well${big ? ' big' : ''}"><img src="${pic}" alt=""></div>` : ''}
+      <div><div class="nbs-fiche-head"><b>${esc(F.nom || S.cr.name)}</b><span class="nbs-type">${esc(F.id === 'base' || F.id === 'chromatique' ? f.type : F.id)}</span></div>
       <dl class="nbs-fiche-stats"><dt>Espèce</dt><dd>${esc(f.espece)}</dd><dt>Taille</dt><dd>${esc(f.taille)}</dd>
       <dt>Poids</dt><dd>${esc(f.poids)}</dd><dt>Habitat</dt><dd>${esc(f.habitat)}</dd></dl></div></div>
       <p class="nbs-read">${esc(f.description)}</p>
-      <div class="nbs-story"><div class="nbs-story-t">Légende</div><p class="nbs-read">${esc(f.histoire)}</p></div>${combat(f.combat)}`
+      <div class="nbs-story"><div class="nbs-story-t">Légende</div><p class="nbs-read">${esc(f.histoire)}</p></div>${combat(F.combat || f.combat)}`
       : '<div class="nbs-hint">Pas encore de fiche : clique « Réécrire la fiche ».</div>';
   }
   const STAT = { pv: 'PV', attaque: 'Attaque', defense: 'Défense', vitesse: 'Vitesse' };
@@ -323,15 +385,15 @@ export default async function (ctx) {
   // ------------------------------------------------------------ attaques animées (corps + calque d'effet)
   const imgCache = {};
   const pic = url => { if (!imgCache[url]) { const im = new Image(); im.src = url; imgCache[url] = im; } return imgCache[url]; };
-  const atkMoves = () => S.cr?.lore?.combat?.attaques || [];
+  const atkMoves = () => form().combat?.attaques || [];
   function atkFrame(n, d, i) {
-    const fx = S.cr?.attack_fx?.[n]?.[d]?.[i];
+    const F = form(), fx = F.fx?.[n]?.[d]?.[i];
     if (!fx) return null;
-    return { body: src(`sprites/attaque${n}_${d}_${i}.png`), fx: fx.effect ? src(`sprites/effet${n}_${d}_${i}.png`) : null, off: fx.offset };
+    return { body: src(`${F.dossier}attaque${n}_${d}_${i}.png`), fx: fx.effect ? src(`${F.dossier}effet${n}_${d}_${i}.png`) : null, off: fx.offset };
   }
   function renderAttacks() {
     const box = $('#attacks'), moves = atkMoves();
-    if (!S.cr || !moves.length || !S.cr.attack_fx?.['1']) { box.innerHTML = '<div class="nbs-hint">Les attaques arrivent avec la fiche du bestiaire.</div>'; return; }
+    if (!S.cr || !moves.length || !form().fx?.['1']) { box.innerHTML = '<div class="nbs-hint">Les attaques arrivent avec la fiche du bestiaire.</div>'; return; }
     box.innerHTML = moves.map((a, k) => `<div class="nbs-atk"><div class="nbs-atk-t">${k + 1}. ${esc(a.nom)} <span class="nbs-hint">· ${esc(a.element)} · ${GENRE[a.genre] || esc(a.genre)}</span></div>
       <div class="nbs-atk-row">${DIRS.map(d => `<canvas width="192" height="192" class="nbs-atk-cv nbs-well" data-n="${k + 1}" data-d="${d}"></canvas>`).join('')}</div></div>`).join('');
   }
@@ -341,6 +403,29 @@ export default async function (ctx) {
     if (!f) return;
     const b = pic(f.body); if (b.complete) g.drawImage(b, 64, 64);
     if (f.fx) { const e = pic(f.fx); if (e.complete) g.drawImage(e, 64 + f.off[0], 64 + f.off[1]); }
+  }
+  // ------------------------------------------------------------ animations de combat (planches : une ligne par direction)
+  const ANIM_NAMES = { attente: 'Attente', degats: 'Dégâts reçus', ko: 'K.O.' };
+  function renderAnims() {
+    const box = $('#anims');
+    if (!S.cr || S.cr.pending || !S.cr.anims) { box.innerHTML = '<div class="nbs-hint">Elles arrivent avec la créature.</div>'; return; }
+    box.innerHTML = Object.keys(ANIM_NAMES).map(a => `<div class="nbs-atk"><div class="nbs-atk-t">${ANIM_NAMES[a]}</div>
+      <div class="nbs-atk-row">${DIRS.map(d => `<canvas width="64" height="64" class="nbs-anim-cv nbs-well" data-a="${a}" data-d="${d}"></canvas>`).join('')}</div></div>`).join('');
+  }
+  function animIndex(ms, t, hold) {  // image à montrer au temps t ; hold : la dernière image reste un moment (K.O.)
+    const total = ms.reduce((x, y) => x + y, 0) + hold;
+    let k = t % total;
+    for (let i = 0; i < ms.length; i++) { if (k < ms[i]) return i; k -= ms[i]; }
+    return ms.length - 1;
+  }
+  function drawAnims() {
+    const now = performance.now(), F = form();
+    $$('.nbs-anim-cv').forEach(cv => {
+      const a = cv.dataset.a, ms = S.cr.anims[a], sheet = pic(src(F.dossier + a + '.png')), g = cv.getContext('2d');
+      const i = animIndex(ms, now, a === 'ko' ? 900 : a === 'degats' ? 600 : 0);
+      g.imageSmoothingEnabled = false; g.clearRect(0, 0, 64, 64);
+      if (sheet.complete) g.drawImage(sheet, i * 64, DIRS.indexOf(cv.dataset.d) * 64, 64, 64, 0, 0, 64, 64);
+    });
   }
   // ------------------------------------------------------------ retouche ciblée
   const RT = { key: 'bas', index: null, x: null, y: null, r: .1 };
@@ -378,6 +463,17 @@ export default async function (ctx) {
   };
   $('#rtText').onkeydown = e => { if (e.key === 'Enter') $('#rtGo').click(); };
 
+  $('#portraitRedo').onclick = () => {
+    if (!S.cr || S.cr.pending) return;
+    show('creer');
+    runJob(() => post('/portrait', { slug: S.cr.slug }));
+  };
+  const portraitTurn = async delta => {
+    if (!S.cr?.portrait_version?.[1]) return;
+    try { refresh(await post('/choose', { slug: S.cr.slug, key: 'portrait', delta })); } catch (e) { $('#loreMsg').textContent = e.message; }
+  };
+  $('#pPrev').onclick = () => portraitTurn(-1);
+  $('#pNext').onclick = () => portraitTurn(1);
   $('#relore').onclick = async () => {
     if (!S.cr) return;
     const b = $('#relore'); b.disabled = true; $('#loreMsg').textContent = 'La plume écrit…';
@@ -388,11 +484,12 @@ export default async function (ctx) {
 
   // ------------------------------------------------------------ créature ouverte
   async function open(slug) {
+    if (S.cr?.slug !== slug) S.form = 'base';
     S.cr = await get('/creature?slug=' + encodeURIComponent(slug));
     S.stamp = Date.now();
     $('#liveTitle').textContent = S.cr.name;
     $('#dirTitle').textContent = S.cr.name + ' · 4 directions × 3 pas · 64×64';
-    renderSheet(); renderLab(); renderSketches(); renderFiche(); renderAttacks();
+    renderSheet(); renderLab(); renderSketches(); renderForms(); renderFiche(); renderAttacks(); renderAnims();
     if (S.tab === 'lab') loadFrame();
   }
   function renderSketches() {  // esquisses pas encore choisies : on les montre, un clic lance le reste
@@ -413,7 +510,7 @@ export default async function (ctx) {
     });
     $$('#sketchRow [data-rt]').forEach(b => b.onclick = () => openRetouch('bas', +b.dataset.rt, src(S.cr.designs[+b.dataset.rt])));
   }
-  const refresh = cr => { S.cr = cr; S.stamp = Date.now(); renderSheet(); renderLab(); renderFiche(); renderAttacks(); if (S.tab === 'lab') loadFrame(); };
+  const refresh = cr => { S.cr = cr; S.stamp = Date.now(); renderSheet(); renderLab(); renderForms(); renderFiche(); renderAttacks(); renderAnims(); if (S.tab === 'lab') loadFrame(); };
 
   // ------------------------------------------------------------ directions
   function renderSheet() {
@@ -453,7 +550,7 @@ export default async function (ctx) {
     if (!view.isConnected) { clearInterval(anim); S.alive = false; return; }
     tick++;
     if (S.cr) $$('img.w').forEach(i => { const s = sprite(i.dataset.d, CYCLE[tick % 4]); if (i.getAttribute('src') !== s) i.src = s; i.style.visibility = s ? '' : 'hidden'; });
-    if (S.cr && S.tab === 'dirs') $$('.nbs-atk-cv').forEach(cv => drawAttack(cv, cv.dataset.n, cv.dataset.d, Math.min(3, tick % 7)));
+    if (S.cr && S.tab === 'dirs') { $$('.nbs-atk-cv').forEach(cv => drawAttack(cv, cv.dataset.n, cv.dataset.d, Math.min(3, tick % 7))); drawAnims(); }
     if (S.tab !== 'lab' || !S.cr) return;
     const fxImg = $('#heroFx');
     if (hero.atk) {  // une attaque en cours : ses 4 images, puis retour à la marche
@@ -617,7 +714,14 @@ export default async function (ctx) {
       <button class="nbs-btn red sq nbs-del" title="Mettre à la corbeille">${ic('corbeille')}</button></div>`).join('')
       : '<div class="nbs-hint">Aucune créature pour l\'instant : invoque la première dans Créer.</div>';
     $$('#lib .nbs-card').forEach(card => {
+      card.classList.toggle('picked', !!S.fuse?.includes(card.dataset.s));
       card.onclick = async e => {
+        if (S.fuse) {  // mode fusion : on choisit deux créatures
+          const i = S.fuse.indexOf(card.dataset.s);
+          if (i >= 0) S.fuse.splice(i, 1); else S.fuse = [...S.fuse, card.dataset.s].slice(-2);
+          fuseBar();
+          return renderLib();
+        }
         const del = e.target.closest('.nbs-del');
         if (del) {
           e.stopPropagation();
@@ -632,6 +736,52 @@ export default async function (ctx) {
     });
   }
   $('#q').oninput = renderLib;
+  function fuseBar() {
+    $('#fuseBar').hidden = !S.fuse;
+    if (!S.fuse) return;
+    const names = S.fuse.map(s => libCache.find(c => c.slug === s)?.name || s);
+    $('#fuseMsg').textContent = names.length ? names.join(' + ') + (names.length < 2 ? ' + … (choisis-en une autre)' : '') : 'Choisis deux créatures finies.';
+    $('#fuseGo').disabled = S.fuse.length !== 2;
+  }
+  $('#fuseBtn').onclick = () => { S.fuse = S.fuse ? null : []; fuseBar(); renderLib(); };
+  $('#fuseStop').onclick = () => { S.fuse = null; fuseBar(); renderLib(); };
+  $('#fuseGo').onclick = () => {
+    const [a, b] = S.fuse || [];
+    if (!b) return;
+    S.fuse = null; fuseBar(); show('creer');
+    runJob(() => post('/fuse', { a, b }));
+  };
+
+  // ------------------------------------------------------------ équilibrage du bestiaire
+  async function loadBalance() {
+    const box = $('#eq');
+    let B;
+    try { B = await get('/balance'); } catch (e) { box.innerHTML = `<div class="nbs-hint">${esc(e.message)}</div>`; return; }
+    if (!B.total) { box.innerHTML = '<div class="nbs-hint">Aucune créature avec une fiche de combat pour l\'instant.</div>' + (B.alertes.length ? `<ul class="nbs-alerts">${B.alertes.map(a => `<li>${esc(a)}</li>`).join('')}</ul>` : ''); return; }
+    const pct = n => Math.round(100 * n / B.total);
+    box.innerHTML = `<div class="nbs-cols nbs-eq">
+      <div class="grow">
+        <div class="nbs-title">Raretés · ${B.total} créature${B.total > 1 ? 's' : ''}</div>
+        <div class="nbs-eqbars">${B.raretes.map((r, i) => `<span class="nbs-rare r${i}">${esc(r.nom)}</span>
+          <i title="attendu : environ ${r.attendu} %"><b class="r${i}" style="width:${pct(r.n)}%"></b><u style="left:${r.attendu}%"></u></i>
+          <em>${r.n} · ${pct(r.n)} %</em>`).join('')}</div>
+        <div class="nbs-hint" style="margin-top:4px">Le trait doré : la part attendue sur un grand bestiaire.</div>
+        <div class="nbs-title" style="margin-top:14px">Types</div>
+        <div class="nbs-eqtypes">${B.types.map(t => `<span class="nbs-eqtype${t.n ? '' : ' none'}"><b>${t.n}</b>${esc(t.type)}</span>`).join('')}</div>
+        <div class="nbs-title" style="margin-top:14px">Moyennes</div>
+        <div class="nbs-eqavg">${Object.entries(STAT).map(([k, l]) => `<span><b>${B.moyennes[k]}</b>${l}</span>`).join('')}</div>
+      </div>
+      <div class="grow">
+        <div class="nbs-title">À surveiller</div>
+        ${B.alertes.length ? `<ul class="nbs-alerts">${B.alertes.map(a => `<li>${esc(a)}</li>`).join('')}</ul>` : '<div class="nbs-ok">✓ Bestiaire équilibré</div>'}
+        <div class="nbs-title" style="margin-top:14px">Classement</div>
+        <div class="nbs-eqlist">${B.creatures.sort((x, y) => y.total - x.total).map(c => `<div class="nbs-eqrow" data-s="${esc(c.slug)}">
+          <img src="${U}lib/${encodeURIComponent(c.slug)}/sprites/bas_repos.png" alt=""><span class="nm">${esc(c.nom)}</span>
+          <span class="nbs-rare r${RAR.indexOf(c.rarete)}">${esc(c.rarete)}</span><span class="nbs-chip">${esc(c.type)}</span>
+          <em>${c.total}</em>${c.variantes ? `<span class="nbs-hint">+${c.variantes} var.</span>` : ''}</div>`).join('')}</div>
+      </div></div>`;
+    $$('#eq .nbs-eqrow').forEach(row => row.onclick = async () => { await open(row.dataset.s); show('dirs'); });
+  }
 
   // ------------------------------------------------------------ démarrage
   renderSheet();

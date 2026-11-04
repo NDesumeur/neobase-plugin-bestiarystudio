@@ -117,6 +117,32 @@ def main():
         v = c["views"]["gauche"]
         assert v["versions"] == n + 1 and v["version"] == v["versions"], v  # la retouche devient la vue active
         assert c["views"]["droite"]["file"] and c["attack_fx"]["1"]["droite"], "le miroir et les attaques suivent"
+        # portrait de combat, animations attente / dégâts / K.O., arene.json
+        assert c["portrait"] and c["portrait_version"][1] >= 1, c["portrait"]
+        _, png = call(port, f"/file?slug={slug}&path=sprites/portrait.png", raw=True)
+        assert Image.open(io.BytesIO(png)).size == (256, 256)
+        _, png = call(port, f"/file?slug={slug}&path=sprites/ko.png", raw=True)
+        assert Image.open(io.BytesIO(png)).size == (256, 256)  # 4 images x 4 directions
+        before = c["portrait_version"][1]
+        assert call(port, "/portrait", {"slug": slug})[0] == 200
+        wait_job(port)
+        _, c = call(port, "/creature?slug=" + slug)
+        assert c["portrait_version"] == [before + 1, before + 1], c["portrait_version"]
+        # variantes : chromatique monte d'un cran, glace prend le type glace
+        assert call(port, "/variant", {"slug": slug, "variant": "arc-en-ciel"})[0] == 400
+        _, c = call(port, "/variant", {"slug": slug, "variant": "chromatique"})
+        _, c = call(port, "/variant", {"slug": slug, "variant": "glace"})
+        f = {x["id"]: x for x in c["forms"]}
+        assert set(f) == {"base", "chromatique", "glace"} and f["glace"]["nom"].endswith("de glace"), f
+        R = ["commun", "peu commun", "rare", "épique", "légendaire"]
+        assert R.index(f["chromatique"]["combat"]["rarete"]) == min(4, R.index(f["base"]["combat"]["rarete"]) + 1)
+        assert f["glace"]["combat"]["faiblesses"] == ["feu", "roche", "acier"]
+        _, png = call(port, f"/file?slug={slug}&path=sprites/variantes/glace/attaque2.png", raw=True)
+        assert Image.open(io.BytesIO(png)).size == (256, 256)
+        ar = json.loads((Path(lib) / "creatures" / slug / "arene.json").read_text(encoding="utf-8"))
+        assert len(ar["formes"]) == 3 and ar["animations"]["ko"]["ms"] and ar["formes"][2]["attaques"][1]["decalages"]["bas"], ar
+        _, c = call(port, "/variant-remove", {"slug": slug, "variant": "glace"})
+        assert c["variants"] == ["chromatique"] and not (Path(lib) / "creatures" / slug / "sprites/variantes/glace").exists()
         _, i = call(port, "/inspire", {"theme": "lovecraft"})
         assert i["description"], i
 
@@ -128,6 +154,10 @@ def main():
         assert atk["genre"] == "projectile" and (Path(e["folder"]) / atk["effet_image"]).is_file(), atk
         assert len(atk["directions"]["gauche"]["frames"]) == 4 and "effet_decalage" in atk["directions"]["bas"]["frames"][2]
         assert Path(e["folder"]).parent == Path(call(port, "/exports")[1]["folder"]), e["folder"]
+        assert meta["animations"]["attente"]["timing_ms"] and (Path(e["folder"]) / meta["animations"]["degats"]["image"]).is_file()
+        assert meta["variantes"][0]["id"] == "chromatique" and (Path(e["folder"]) / "variantes/chromatique/attaque1.png").is_file()
+        _, bal = call(port, "/balance")
+        assert bal["total"] == 1 and sum(x["n"] for x in bal["raretes"]) == 1 and bal["alertes"], bal
 
         _, libr = call(port, "/library")
         assert [x["slug"] for x in libr] == [slug] and libr[0]["thumb"]
@@ -142,7 +172,26 @@ def main():
             wait_job(port)
             _, c = call(port, "/creature?slug=" + r["slug"])
             assert c["views"]["gauche"]["versions"] == 4, c["views"]["gauche"]  # 2 refusés + 2 refaits
-            call(port, "/delete", {"slug": r["slug"]})
+            # fusion : l'hybride de deux créatures finies hérite du type de l'une et d'une attaque de chacune
+            _, r2 = call(port, "/create", {"name": "Bis", "description": "chien de glace", "seed": 9})
+            wait_job(port)
+            call(port, "/continue", {"slug": r2["slug"], "index": 0})
+            wait_job(port)
+            assert call(port, "/fuse", {"a": r["slug"], "b": r["slug"]})[0] == 400, "fusion avec soi-même"
+            code, fu = call(port, "/fuse", {"a": r["slug"], "b": r2["slug"]})
+            assert code == 200, fu
+            wait_job(port)
+            _, c = call(port, "/creature?slug=" + fu["slug"])
+            assert c["pending"] and len(c["designs"]) == 3 and c["parents"] == [r["slug"], r2["slug"]], c
+            assert "hybride" in c["description"], c["description"]
+            call(port, "/continue", {"slug": fu["slug"], "index": 0})
+            wait_job(port)
+            _, c = call(port, "/creature?slug=" + fu["slug"])
+            pa = [call(port, "/creature?slug=" + s_)[1]["lore"] for s_ in (r["slug"], r2["slug"])]
+            assert c["lore"]["type"] in {p["type"] for p in pa}, c["lore"]["type"]
+            assert [a["nom"] for a in c["lore"]["combat"]["attaques"]] == [pa[0]["attaques"][0]["nom"], pa[1]["attaques"][-1]["nom"]]
+            for s_ in (r["slug"], r2["slug"], fu["slug"]):
+                call(port, "/delete", {"slug": s_})
         print("OK : toutes les routes répondent", "(moteur réel)" if real else "(moteur factice)")
     finally:
         proc.kill()

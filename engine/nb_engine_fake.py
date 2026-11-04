@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
 """Moteur factice (mêmes fonctions que nb_engine, sans GPU) : sert aux tests du serveur et de l'interface."""
+import time
+
 from PIL import Image, ImageDraw, ImageOps
 
 TRIES = 2
@@ -28,6 +30,7 @@ def _blob(color, seed, lift=0, size=256):
 
 def generate_design(client, description, seed, progress=lambda m: None, cancel=lambda: False, brief=None):
     progress("Esquisse du design")
+    time.sleep(.05)  # une vraie tâche dure : le test « deux tâches en même temps » a le temps de la voir tourner
     return _blob(COLORS["bas"], seed)
 
 
@@ -80,6 +83,21 @@ def brief(description, seed=1):
         return dict(posture="flotte", pattes=0, en="a floating test creature", profil="a round body",
                     anatomie=["3 heads: side by side"])
     return dict(posture="quatre_pattes", pattes=4, en="a test creature", profil="a round body")
+
+
+def generate_portrait(client, design, move, seed, progress=lambda m: None, cancel=lambda: False, brief=None,
+                      description=""):
+    progress("Portrait de combat")
+    return _blob((220, 120, 40), seed, size=512)
+
+
+def generate_fusion(client, designs, description, seed, progress=lambda m: None, cancel=lambda: False, brief=None):
+    progress("Esquisse de l'hybride")
+    return _blob((150, 60, 200), seed)
+
+
+def fuse(a, b, seed=None):
+    return dict(name=a["name"][:3] + b["name"][-3:], description=f"hybride de {a['description']} et {b['description']}")
 
 
 LOOKS = []  # réponses imposées par le test (sinon : tout est bon)

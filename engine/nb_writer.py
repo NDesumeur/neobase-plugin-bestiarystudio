@@ -115,6 +115,20 @@ def idea(theme="melange", seed=None):
     return dict(name=name, description=desc, theme=theme)
 
 
+def fuse(a, b, seed=None):
+    """{"name", "description"} : l'hybride de deux créatures (a, b = {"name", "description"})."""
+    seed = random.randrange(10 ** 6) if seed is None else int(seed)
+    prompt = (f"Créature A : {a['name']}, {a['description']}\nCréature B : {b['name']}, {b['description']}\n"
+              "Invente l'hybride de ces deux créatures : un seul animal qui garde des traits bien visibles de chacune "
+              "(la silhouette ou la posture de l'une, des parties et des couleurs de l'autre). JSON avec exactement deux "
+              "clés : \"nom\" (un nom inventé qui mélange les deux noms) et \"description\" (la consigne de dessin).")
+    out = _ask(SYS_IDEA, prompt, seed, temperature=0.9)
+    name, desc = _clean(out.get("nom"), 60), _clean(out.get("description"), 400)
+    if not desc:
+        raise WriterError("La plume n'a pas inventé d'hybride, réessaie.")
+    return dict(name=name or a["name"][:len(a["name"]) // 2] + b["name"][len(b["name"]) // 2:], description=desc)
+
+
 POSTURES = ("quatre_pattes", "deux_jambes", "plusieurs_pattes", "flotte", "vole", "rampe", "nage")
 SYS_BRIEF = (
     "Tu es directeur artistique pour un jeu vidéo : tu prépares la consigne d'un générateur d'images à partir d'une "

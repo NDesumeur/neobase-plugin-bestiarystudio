@@ -15,12 +15,18 @@ Décris une créature en français, NeoBestiary Studio la dessine en **sprite pi
 - **Fiche de bestiaire** : à la fin de la création, une fiche façon Pokédex est écrite toute seule : type, espèce, taille, poids, habitat, description et une petite histoire. Elle s'affiche avec le portrait, dans une police de livre facile à lire. « Réécrire la fiche » en propose une autre.
 - **Combat** : la fiche donne une **rareté** (commun, peu commun, rare, épique, légendaire), des **statistiques** (PV, attaque, défense, vitesse), des **faiblesses** et des **résistances** tirées du type. La rareté reste rare : environ une créature sur deux est commune et une sur cinquante légendaire ; une créature plus menaçante monte d'un cran au plus, et plus elle est rare, plus ses statistiques sont hautes.
 - **Attaques** : chaque créature a **2 attaques** (griffe, morsure, charge, projectile, souffle, onde ou rayon), avec leur élément et leur puissance. Chacune est animée dans les 4 directions, en 4 images (élan, frappe, impact, retour), avec un effet en pixel art aux couleurs de l'élément. Dans l'aperçu en jeu, les touches 1 et 2 les lancent.
+- **Animations de combat** : en plus de la marche et des attaques, chaque créature respire et cligne des yeux en attendant, reçoit les coups (flash blanc, recul teinté de rouge) et tombe K.O. (bascule, s'effondre, disparaît). Tout est fait à partir de ses propres pixels, dans les 4 directions.
+- **Portrait de combat** : une grande illustration pixel art 256×256 de la créature en pleine attaque, pour l'écran de rencontre et la fiche. Le nombre de têtes est contrôlé (un portrait qui en cache une est refait) ; « Refaire le portrait » en propose un autre, ◀ ▶ garde les anciens.
+- **Variantes de couleur** : la même créature repeinte en un instant, sans carte graphique : **chromatique** (teintes tournées, un cran de rareté en plus) ou un **élément** (glace, feu, ombre, poison…), dont elle prend alors le type, les faiblesses et la couleur des attaques. Chaque variante a ses sprites, ses attaques et ses animations.
+- **Fusion** : dans la Bibliothèque, « Fusionner » puis deux créatures finies. La plume invente l'hybride (nom et description), les esquisses partent des deux designs, et la fiche hérite du type de l'un des parents, d'une attaque de chacun et de la menace du plus fort.
+- **Équilibre** : un onglet qui montre la répartition des raretés (et la part attendue), des types et les statistiques moyennes de tout ton bestiaire, avec un classement et ce qui cloche : « aucune créature de glace », « trop de légendaires »…
+- **NeoBestiary Arène** : chaque créature finie a un fichier `arene.json` (fiche de combat, planches, animations, variantes), lu par l'appli NeoBestiary Arène pour la faire combattre.
 - **Directions** : la planche 4 directions × 3 pas. Chaque image a ses versions (◀ ▶) et chaque direction peut être refaite ; refaire la face refait toute la créature.
 - **Sprite Lab** :
   - un éditeur pixel 64×64 (crayon, gomme, pipette, seau, annuler / refaire) ;
   - la palette commune aux 12 images, le contour ;
   - un aperçu en jeu : ta créature marche sur l'herbe avec les flèches du clavier.
-- **Export** : chaque créature exportée va dans le dossier `Exports` (bouton dans la Bibliothèque), un sous-dossier par créature : la planche PNG (3 colonnes × 4 lignes de 64×64), son JSON (directions, images, point d'ancrage aux pieds, ordre de l'animation, fiche) le portrait en grand, et pour chaque attaque la planche du corps, celle de l'effet et leur décalage dans le JSON.
+- **Export** : chaque créature exportée va dans le dossier `Exports` (bouton dans la Bibliothèque), un sous-dossier par créature : la planche PNG (3 colonnes × 4 lignes de 64×64), son JSON (directions, images, point d'ancrage aux pieds, ordre de l'animation, fiche) le portrait de combat, pour chaque attaque la planche du corps, celle de l'effet et leur décalage dans le JSON, les planches attente / dégâts / K.O., et chaque variante dans `variantes/`.
 - **Bibliothèque** : toutes tes créatures, avec recherche. Une créature supprimée part dans une corbeille, elle n'est pas effacée.
 
 Les créatures sont rangées dans `Documents\NeoBestiary Studio`, les exports dans `Documents\NeoBestiary Studio\Exports`.
@@ -39,7 +45,7 @@ ComfyUI démarre tout seul à la première invocation et s'arrête quand tu ferm
 
 ## Combien de temps
 
-Sur une RTX 4060 : une demi-minute pour les 3 esquisses, puis environ 2 minutes pour le dos, le profil (deux essais chacun, le meilleur est gardé automatiquement), la marche et la fiche. Le contrôle ajoute une dizaine de secondes, plus le temps d'une esquisse refaite quand il en faut une. Une idée d'inspiration prend une dizaine de secondes (une minute la première fois, le temps de charger le modèle de texte).
+Sur une RTX 4060 : une demi-minute pour les 3 esquisses, puis environ 2 minutes pour le dos, le profil (deux essais chacun, le meilleur est gardé automatiquement), la marche et la fiche. Le contrôle ajoute une dizaine de secondes, plus le temps d'une esquisse refaite quand il en faut une ; le portrait de combat, une vingtaine de secondes. Une idée d'inspiration prend une dizaine de secondes (une minute la première fois, le temps de charger le modèle de texte).
 
 ## Permissions
 

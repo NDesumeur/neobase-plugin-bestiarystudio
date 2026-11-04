@@ -290,6 +290,42 @@ def generate_edit(client, image, instruction, seed, zone=None, progress=lambda m
     return nbc.run_workflow(client, g, cancel, mode="RGBA")
 
 
+GENRE_EN = {"griffe": "a slashing claw strike", "morsure": "a lunging bite, jaws wide open", "charge": "a headlong charge",
+            "projectile": "spitting a projectile", "souffle": "a breath attack streaming from its mouth",
+            "onde": "a shockwave bursting around it", "rayon": "firing an energy beam"}
+ELEMENT_EN = {"feu": "fire", "eau": "water", "plante": "plant", "vent": "wind", "roche": "rock", "glace": "ice",
+              "foudre": "lightning", "lumière": "light", "ombre": "shadow", "esprit": "spirit", "acier": "steel",
+              "poison": "poison"}
+
+
+def portrait_prompt(move, brief=None, description=""):
+    what = GENRE_EN.get(move.get("genre"), "attacking")
+    elem = ELEMENT_EN.get(move.get("element"), "")
+    return (f"The same creature in a dynamic battle pose, mid-attack: {what}, with {elem} energy. "
+            "Dramatic three-quarter front view, large, filling the frame, the entire creature visible. "
+            "Keep the identical design, colors, anatomy (same number of heads, eyes, legs, horns) and pixel art style; "
+            "every head and body part stays clearly visible, side by side, none hidden behind the body. "
+            f"The creature: {describe(description, brief)} "
+            "Plain flat light gray background, no text, no scenery, no cast shadow.")
+
+
+def generate_portrait(client, design, move, seed, progress=lambda m: None, cancel=lambda: False, brief=None,
+                      description=""):
+    """Le portrait de combat : la créature en pleine attaque (sa 2e attaque, la plus forte), d'après son design."""
+    progress("Portrait de combat")
+    return render(client, MODEL, portrait_prompt(move, brief, description), seed, refs_img=[design], cancel=cancel, cut=True)
+
+
+def fusion_prompt(description, brief=None):
+    return ("Combine the two reference creatures into ONE single new hybrid creature that clearly mixes visible traits "
+            f"of both. {STYLE} The hybrid: {describe(description, brief)} {pose_line(brief)}")
+
+
+def generate_fusion(client, designs, description, seed, progress=lambda m: None, cancel=lambda: False, brief=None):
+    progress("Esquisse de l'hybride")
+    return render(client, MODEL, fusion_prompt(description, brief), seed, refs_img=list(designs), cancel=cancel, cut=True)
+
+
 # --------------------------------------------------------------------------- créature complète
 
 MODEL = "klein"
