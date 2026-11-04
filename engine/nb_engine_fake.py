@@ -84,6 +84,9 @@ def model():
     return "factice"
 
 
+THEMES = {"melange": None, "animaux": None, "monstres": None}
+
+
 def idea(theme="melange", seed=None):
     return dict(name="Crapaud test", description="un crapaud violet à quatre pattes avec trois yeux rouges", theme=theme)
 

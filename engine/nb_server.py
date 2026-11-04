@@ -96,6 +96,11 @@ class Jobs:
         with self.lock:
             self.state["total"] = self.state.get("total", 1) + n
 
+    def restart(self, total, **info):
+        """Nouvelle créature dans une même tâche (invocation en boucle) : la jauge repart de zéro."""
+        with self.lock:
+            self.state.update(total=total, count=0, progress=0.0, **info)
+
     def cancel(self):
         self._cancel = True
 
@@ -183,6 +188,51 @@ class Studio:
             self.lib.set_active(slug, "bas", 0)
             return slug
         return self.jobs.start("sketch", run, SKETCHES + 2, slug), slug
+
+    def auto(self):
+        """Invocation en boucle : une idée au hasard, ses esquisses, la meilleure (vérifiée) choisie toute seule, toute la
+        créature, puis la suivante, jusqu'à /auto-stop (qui laisse finir la créature en cours) ou /cancel (tout de suite)."""
+        if self.jobs.get()["running"]:
+            raise RuntimeError("Une tâche est déjà en cours.")
+        self.auto_stop = False
+
+        def run(progress, cancel):
+            made, fails, last = 0, 0, ""
+            while not cancel() and not self.auto_stop:
+                self.jobs.restart(SKETCHES + 3 + self._rest_steps(""), made=made, slug=last)
+                try:
+                    last = self._auto_one(progress, cancel, made + 1)
+                    made, fails = made + 1, 0
+                    self.jobs.restart(1, made=made, slug=last)
+                except Exception as exc:
+                    if cancel():
+                        raise
+                    fails += 1
+                    print("invocation en boucle : créature ratée :", exc)
+                    if fails >= 3:  # trois ratés de suite : quelque chose ne va pas (ComfyUI, Ollama), on s'arrête
+                        raise RuntimeError(f"La boucle s'arrête après {made} créature(s) : {exc}")
+            return last
+        return self.jobs.start("auto", run, 1)
+
+    def _auto_one(self, progress, cancel, n):
+        progress(f"Créature {n} : idée")
+        self._free_gpu()  # la plume a besoin de la carte
+        idea = self.writer.idea(random.choice([t for t in self.writer.THEMES if t != "melange"] + ["melange"]))
+        seed = random.randrange(10 ** 6)
+        rec = self.lib.new_record(idea["name"] or "Créature")
+        rec.update(slug=self._unique_slug(idea["name"] or "Créature"), description=idea["description"], seed=seed,
+                   lab=dict(LAB_DEFAULTS), auto=True)
+        self.lib.save(rec)
+        slug = rec["slug"]
+        self.jobs.restart(self.jobs.get()["total"], slug=slug)
+        tag = lambda m: progress(f"Créature {n} · {m}")
+        brief = self._brief(slug)
+        picks = self._sketches(idea["description"], seed, brief, tag, cancel)
+        for k, (im, note) in enumerate(picks, 1):
+            self.lib.add_pil(slug, "bas", im, f"esquisse {k}{note}")
+        best = next((i for i, (_, note) in enumerate(picks) if "✓" in note), 0)  # la première vérifiée
+        self.lib.set_active(slug, "bas", best)
+        return self._rest(self.client(), slug, seed + best, tag, cancel)
 
     def _look(self, images):
         """Ce que le modèle de vision voit sur ces images ([] s'il n'y en a pas : on ne contrôle rien)."""
@@ -1081,6 +1131,8 @@ def make_handler(studio, token):
     routes_post = {
         "/create": lambda b: dict(zip(("job", "slug"), studio.create(b.get("name"), b.get("description"), b.get("seed")))),
         "/cancel": lambda b: studio.jobs.cancel() or dict(ok=True),
+        "/auto": lambda b: dict(job=studio.auto()),
+        "/auto-stop": lambda b: setattr(studio, "auto_stop", True) or dict(ok=True),
         "/redo": lambda b: dict(job=studio.redo(b["slug"], b["dir"])),
         "/continue": lambda b: dict(job=studio.finish(b["slug"], b["index"])),
         "/rarity": lambda b: studio.set_rarity(b["slug"], b.get("rarete")),

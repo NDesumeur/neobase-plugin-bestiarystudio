@@ -13,7 +13,7 @@ const HTML = `<link rel="stylesheet" href="${U}ui/studio.css">
   <i class="dust" style="left:71%;top:97%;animation-delay:-1s,-.8s"></i><i class="dust" style="left:90%;top:99%;animation-delay:-6s,-.2s"></i>
   <header class="nbs-head">
     <i class="emb"></i>
-    <div><h1>NeoBestiary <b>Studio</b></h1><small>Grimoire des créatures · sprites 64×64 · 4 directions</small></div>
+    <h1>NeoBestiary <b>Studio</b></h1>
     <div class="nbs-status off" id="st"><i></i><span>Réveil du grimoire…</span></div>
   </header>
   <nav class="nbs-tabs">
@@ -39,21 +39,19 @@ const HTML = `<link rel="stylesheet" href="${U}ui/studio.css">
             <button class="nbs-btn dark sm" data-t="animaux">Animaux</button>
             <button class="nbs-btn dark sm" data-t="monstres">Monstres</button>
             <button class="nbs-btn dark sm" data-t="folklore">Folklore</button>
+            <button class="nbs-btn sm" id="inspire" style="margin-left:auto">${ic('etoile')}Inspire-moi</button>
           </div>
-          <div class="nbs-row" style="margin-top:8px">
-            <button class="nbs-btn" id="inspire">${ic('etoile')}Inspire-moi</button>
-            <span class="nbs-hint" id="inspireMsg">Une idée de créature, écrite clairement pour le dessin.</span>
-          </div>
+          <span class="nbs-hint" id="inspireMsg"></span>
           <div class="nbs-sep"></div>
           <div class="nbs-title">Nom</div>
           <div class="nbs-parch"><input type="text" id="name" maxlength="60" placeholder="Ophidrache, Chien de feu…" spellcheck="false"></div>
           <div class="nbs-sep"></div>
           <div class="nbs-title">Décris ta créature</div>
           <div class="nbs-parch"><textarea id="desc" rows="5" placeholder="une pieuvre géante avec un seul grand œil jaune, six tentacules violets…"></textarea></div>
-          <div class="nbs-hint" style="margin-top:6px">Écris simplement : « juste un œil », « sans pattes », « un seul œil »… tout est respecté.</div>
           <div class="nbs-sep"></div>
           <div class="nbs-row">
             <button class="nbs-btn go big" id="go">${ic('play')}Invoquer</button>
+            <button class="nbs-btn" id="auto" title="Invente, dessine et finit des créatures l'une après l'autre, jusqu'à ce que tu rappuies">${ic('refaire')}Invocation en boucle</button>
             <button class="nbs-btn red" id="cancel" hidden>Arrêter</button>
             <button class="nbs-btn dark sq" id="dice" title="Nouvelle graine">${ic('de')}</button>
             <span class="nbs-hint" id="seedTxt"></span>
@@ -61,13 +59,12 @@ const HTML = `<link rel="stylesheet" href="${U}ui/studio.css">
           <div class="nbs-sep"></div>
           <div class="nbs-bar"><i id="bar" style="width:0"></i></div>
           <div class="nbs-step" id="step">&nbsp;</div>
-          <div class="nbs-hint" id="stepHint">D'abord 3 esquisses (une demi-minute) : tu choisis la plus fidèle, puis 2 à 3 minutes pour le dos, le profil et la marche.</div>
+          
           <div id="sketches" hidden>
             <div class="nbs-sep"></div>
             <div class="nbs-title">Choisis ton design</div>
             <div class="nbs-row nbs-sketches" id="sketchRow"></div>
             <div class="nbs-hint" id="understood"></div>
-            <div class="nbs-hint">Aucune ne va ? Change la graine ou ta description et invoque à nouveau.</div>
           </div>
         </div>
         <div>
@@ -83,7 +80,7 @@ const HTML = `<link rel="stylesheet" href="${U}ui/studio.css">
       <div class="nbs-sep"></div>
       <div class="nbs-row">
         <button class="nbs-btn dark" id="toLab">${ic('oeil')}Voir en jeu</button>
-        <span class="nbs-hint" id="dirHint">Clique une image puis ◀ ▶ pour changer sa version.</span>
+        <span class="nbs-hint" id="dirHint"></span>
       </div>
       <div class="nbs-sep"></div>
       <div class="nbs-title">Variantes de couleur</div>
@@ -91,7 +88,7 @@ const HTML = `<link rel="stylesheet" href="${U}ui/studio.css">
       <div class="nbs-row" style="margin-top:8px">
         <div class="nbs-parch"><select id="varSel"></select></div>
         <button class="nbs-btn dark" id="varAdd">${ic('etoile')}Créer la variante</button>
-        <span class="nbs-hint" id="varMsg">La même créature repeinte, au pixel près. Chromatique : un cran de rareté de plus ; élément : elle en prend le type.</span>
+        <span class="nbs-hint" id="varMsg"></span>
       </div>
       <div class="nbs-sep"></div>
       <div class="nbs-title">Attaques</div>
@@ -195,7 +192,7 @@ const HTML = `<link rel="stylesheet" href="${U}ui/studio.css">
       <div class="nbs-rt-cols">
         <div class="nbs-rt-pic nbs-well nbs-ct-pic" id="ctPic"><img id="ctImg" alt=""><canvas id="ctMask"></canvas></div>
         <div class="nbs-rt-side">
-          <div class="nbs-hint">Peins sur l'image. La gomme retire ce qui dépasse (en rouge) ; « Restaurer » ramène ce que le détourage a mangé (en vert).</div>
+          <div class="nbs-hint">Rouge : à effacer · vert : à restaurer.</div>
           <div class="nbs-row nbs-themes" id="ctTool" style="margin-top:8px">
             <button class="nbs-btn dark sm on" data-t="erase">Gomme</button>
             <button class="nbs-btn dark sm" data-t="keep">Restaurer</button>
@@ -210,7 +207,7 @@ const HTML = `<link rel="stylesheet" href="${U}ui/studio.css">
             <button class="nbs-btn dark" id="ctClear">${ic('refaire')}Effacer les traits</button>
             <button class="nbs-btn dark" id="ctClose">Annuler</button>
           </div>
-          <div class="nbs-hint" id="ctMsg" style="margin-top:8px">Le résultat devient une nouvelle version : l'ancienne reste avec ◀ ▶.</div>
+          <div class="nbs-hint" id="ctMsg" style="margin-top:8px"></div>
         </div>
       </div>
     </div>
@@ -221,7 +218,7 @@ const HTML = `<link rel="stylesheet" href="${U}ui/studio.css">
       <div class="nbs-rt-cols">
         <div class="nbs-rt-pic nbs-well" id="rtPic"><img id="rtImg" alt=""><i id="rtZone"></i></div>
         <div class="nbs-rt-side">
-          <div class="nbs-hint">Clique sur l'image là où il faut changer quelque chose, ou choisis « Toute la créature ».</div>
+          <div class="nbs-hint">Clique la zone à changer.</div>
           <div class="nbs-row nbs-themes" id="rtSize" style="margin-top:8px">
             <button class="nbs-btn dark sm" data-r=".06">Petite zone</button>
             <button class="nbs-btn dark sm on" data-r=".1">Moyenne</button>
@@ -234,7 +231,7 @@ const HTML = `<link rel="stylesheet" href="${U}ui/studio.css">
             <button class="nbs-btn go" id="rtGo">${ic('crayon')}Retoucher</button>
             <button class="nbs-btn dark" id="rtClose">Annuler</button>
           </div>
-          <div class="nbs-hint" id="rtMsg" style="margin-top:8px">La retouche devient une nouvelle version : l'ancienne reste avec ◀ ▶.</div>
+          <div class="nbs-hint" id="rtMsg" style="margin-top:8px"></div>
         </div>
       </div>
     </div>
@@ -343,6 +340,30 @@ export default async function (ctx) {
       .then(j => { if (j) { S.seed = Math.floor(Math.random() * 1e6); seedTxt(); } });
   };
   $('#cancel').onclick = () => post('/cancel');
+
+  // ------------------------------------------------------------ invocation en boucle : rappuyer l'arrête après la créature en cours
+  $('#auto').onclick = async () => {
+    const b = $('#auto');
+    if (S.auto) {
+      S.auto = 'stop';
+      await post('/auto-stop').catch(() => {});
+      b.disabled = true; b.lastChild.textContent = 'Arrêt après cette créature…';
+      return;
+    }
+    try { await post('/auto'); } catch (e) { say(e.message, true); return; }
+    S.auto = 'on'; $('#go').hidden = true; $('#cancel').hidden = false; $$('.nbs-redo').forEach(x => x.disabled = true);
+    b.lastChild.textContent = 'Arrêter la boucle';
+    let made = 0;
+    const j = await follow(j => {
+      $('#bar').style.width = Math.round(j.progress * 100) + '%';
+      say(`${S.auto === 'stop' ? 'Dernière créature · ' : ''}${j.step === 'Préparation' ? 'Préparation… (ComfyUI démarre, ~1 min la première fois)' : j.step + '…'} ${Math.round(j.progress * 100)} % · ${j.made || 0} finie${(j.made || 0) > 1 ? 's' : ''}`);
+      if ((j.made || 0) > made && j.slug) { made = j.made; open(j.slug).catch(() => {}); }
+    });
+    S.auto = null; busy(false);
+    b.disabled = false; b.lastChild.textContent = 'Invocation en boucle';
+    say(j.error ? j.error : `Boucle terminée : ${j.made || made} créature${(j.made || made) > 1 ? 's' : ''} invoquée${(j.made || made) > 1 ? 's' : ''} ✓`, !!j.error);
+    if (j.slug) await open(j.slug).catch(() => {});
+  };
   $('#stages').innerHTML = DIRS.map((d, i) => `<div class="nbs-stage${i % 3 ? ' path' : ''}"><img class="w" data-d="${d}" alt=""><span class="tag">${ARROW[d]} ${d}</span></div>`).join('');
 
   // ------------------------------------------------------------ inspiration
@@ -491,7 +512,7 @@ export default async function (ctx) {
     if (!url) return;
     Object.assign(RT, { key, index, x: null, y: null });
     $('#rtTitle').textContent = index === null ? `Retoucher ${NAMES[key]}` : `Retoucher l'esquisse ${index + 1}`;
-    $('#rtImg').src = url; $('#rtText').value = ''; $('#rtMsg').textContent = "La retouche devient une nouvelle version : l'ancienne reste avec ◀ ▶.";
+    $('#rtImg').src = url; $('#rtText').value = ''; $('#rtMsg').textContent = '';
     drawZone(); $('#retouch').hidden = false; $('#rtText').focus();
   }
   function drawZone() {
@@ -541,7 +562,7 @@ export default async function (ctx) {
     if (!url) return;
     CT.key = key;
     $('#ctTitle').textContent = `Détourage de ${CT_NAMES[key] || key}`;
-    $('#ctMsg').textContent = "Le résultat devient une nouvelle version : l'ancienne reste avec ◀ ▶.";
+    $('#ctMsg').textContent = '';
     const img = $('#ctImg'), cv = $('#ctMask');
     img.onload = () => { cv.width = img.naturalWidth; cv.height = img.naturalHeight; placeMask(); };
     img.src = url;
@@ -648,7 +669,7 @@ export default async function (ctx) {
     });
     box.querySelectorAll('[data-redo]').forEach(b => b.onclick = () => {
       $('#dirHint').textContent = 'Nouvelle version en cours… (suivi dans Créer)';
-      runJob(() => post('/redo', { slug: S.cr.slug, dir: b.dataset.redo })).then(() => { $('#dirHint').textContent = 'Clique une image puis ◀ ▶ pour changer sa version.'; });
+      runJob(() => post('/redo', { slug: S.cr.slug, dir: b.dataset.redo })).then(() => { $('#dirHint').textContent = ''; });
     });
   }
   function verTxt(d) {
@@ -880,7 +901,7 @@ export default async function (ctx) {
         <div class="nbs-eqbars">${B.raretes.map((r, i) => `<span class="nbs-rare r${i}">${esc(r.nom)}</span>
           <i title="attendu : environ ${r.attendu} %"><b class="r${i}" style="width:${pct(r.n)}%"></b><u style="left:${r.attendu}%"></u></i>
           <em>${r.n} · ${pct(r.n)} %</em>`).join('')}</div>
-        <div class="nbs-hint" style="margin-top:4px">Le trait doré : la part attendue sur un grand bestiaire.</div>
+        
         <div class="nbs-title" style="margin-top:14px">Types</div>
         <div class="nbs-eqtypes">${B.types.map(t => `<span class="nbs-eqtype${t.n ? '' : ' none'}"><b>${t.n}</b>${esc(t.type)}</span>`).join('')}</div>
         <div class="nbs-title" style="margin-top:14px">Moyennes</div>
@@ -890,7 +911,7 @@ export default async function (ctx) {
         <div class="nbs-title">À surveiller</div>
         ${B.alertes.length ? `<ul class="nbs-alerts">${B.alertes.map(a => `<li>${esc(a)}</li>`).join('')}</ul>` : '<div class="nbs-ok">✓ Bestiaire équilibré</div>'}
         ${B.conseils?.length ? `<div class="nbs-title" style="margin-top:14px">Raretés conseillées</div>
-        <div class="nbs-hint">D'après le prestige de chaque créature, comparé au reste du bestiaire.</div>
+        
         <div class="nbs-eqlist">${B.conseils.map(t => `<div class="nbs-eqrow nbs-tip"><span class="nm">${esc(t.nom)} <span class="nbs-hint">· prestige ${t.prestige}</span></span>
           <span class="nbs-rare r${RAR.indexOf(t.actuelle)}">${esc(t.actuelle)}</span>→<span class="nbs-rare r${RAR.indexOf(t.conseillee)}">${esc(t.conseillee)}</span>
           <button class="nbs-btn dark sm" data-tip="${esc(t.slug)}" data-r="${esc(t.conseillee)}">Appliquer</button></div>`).join('')}</div>` : ''}

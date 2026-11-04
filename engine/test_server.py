@@ -205,6 +205,20 @@ def main():
         assert [x["slug"] for x in libr] == [slug] and libr[0]["thumb"]
         call(port, "/delete", {"slug": slug})
         assert call(port, "/library")[1] == [] and (Path(lib) / "corbeille").is_dir()
+        if not real:  # invocation en boucle : au moins 2 créatures finies, puis l'arrêt laisse finir celle en cours
+            assert call(port, "/auto", {})[0] == 200
+            assert call(port, "/create", {"name": "X", "description": "x"})[0] == 400, "la boucle n'occupe pas le moteur"
+            t = time.time()
+            while call(port, "/job")[1].get("made", 0) < 2 and time.time() - t < 300:
+                time.sleep(0.3)
+            call(port, "/auto-stop", {})
+            j = wait_job(port)
+            assert j["kind"] == "auto" and j["made"] >= 2, j
+            done = [x for x in call(port, "/library")[1]]
+            cs = [call(port, "/creature?slug=" + x["slug"])[1] for x in done]
+            assert len(cs) == j["made"] and all(not c_["pending"] and c_["lore"] and len(c_["sprites"]) == 12 for c_ in cs), len(cs)
+            for x in done:
+                call(port, "/delete", {"slug": x["slug"]})
         if not real:  # contrôle automatique : l'esquisse à 1 tête est refaite, le profil avec pattes est refait
             _, r = call(port, "/create", {"name": "Trio", "description": "méduse à trois têtes qui flotte", "seed": 5})
             wait_job(port)
