@@ -17,11 +17,11 @@ const HTML = `<link rel="stylesheet" href="${U}ui/studio.css">
     <div class="nbs-status off" id="st"><i></i><span>Réveil du grimoire…</span></div>
   </header>
   <nav class="nbs-tabs">
-    <button class="nbs-tab on" data-p="creer">${ic('creer')}Créer</button>
-    <button class="nbs-tab" data-p="dirs">${ic('directions')}Directions</button>
-    <button class="nbs-tab" data-p="lab">${ic('lab')}Sprite Lab</button>
-    <button class="nbs-tab" data-p="lib">${ic('biblio')}Bibliothèque</button>
-    <button class="nbs-tab" data-p="eq">${ic('balance')}Équilibre</button>
+    <button class="nbs-tab on" data-p="creer" title="Créer">${ic('creer')}Créer</button>
+    <button class="nbs-tab" data-p="dirs" title="Directions">${ic('directions')}Directions</button>
+    <button class="nbs-tab" data-p="lab" title="Sprite Lab">${ic('lab')}Sprite Lab</button>
+    <button class="nbs-tab" data-p="lib" title="Bibliothèque">${ic('biblio')}Bibliothèque</button>
+    <button class="nbs-tab" data-p="eq" title="Équilibre">${ic('balance')}Équilibre</button>
   </nav>
   <main class="nbs-frame">
     <section class="nbs-page" id="p-setup">

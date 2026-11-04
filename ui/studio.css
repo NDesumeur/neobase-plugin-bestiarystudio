@@ -269,18 +269,39 @@
 .nbs-eqrow .nbs-rare { font-size: 13px; padding: 0 6px; }
 .nbs-eqrow em { font-style: normal; color: var(--brass); min-width: 34px; text-align: right; }
 
-/* 1.1.1 : les onglets sont gravés dans une encoche du cadre (le liseré monte et contourne la barre, sans trait dessous) */
-.nbs-head { margin-bottom: 4px; }
+/* 1.1.1 : une plaque de laiton posée à cheval sur le liseré du cadre ; les onglets y sont gravés */
+.nbs-head { margin-bottom: 14px; }
 .nbs-head .emb { width: 48px; height: 48px; background-size: 48px; }
 .nbs-head h1 { font-size: 36px; line-height: 40px; }
-.nbs-tabs { width: fit-content; max-width: calc(100% - 96px); margin: 0 auto -24px; padding: 0 6px; gap: 2px; z-index: 2;
-  border: solid transparent; border-width: 24px 24px 0; border-image: url(panel.png) 12 12 0 fill / 24px 24px 0 stretch; }
-.nbs-tab, .nbs-tab.on { height: 44px; margin: 0; padding: 0 14px; border: 0; border-image: none; background: none; filter: none; transform: none; }
+.nbs-tabs { width: fit-content; max-width: calc(100% - 120px); margin: 0 auto -36px; padding: 0 10px; gap: 0; z-index: 2;
+  align-items: center; height: 48px; background: var(--ink1);
+  box-shadow: inset 0 2px 0 var(--ink2), 0 0 0 2px var(--ink0), 0 0 0 4px var(--brass3), 0 -2px 0 4px var(--brass),
+              0 0 0 6px var(--brass2), 0 0 0 8px var(--brass3), 0 0 0 10px var(--ink0), 0 6px 0 10px rgba(13, 10, 20, .5); }
+/* losanges de laiton aux deux bouts, sur le liseré */
+.nbs-tabs::before, .nbs-tabs::after { content: ""; position: absolute; top: 23px; width: 2px; height: 2px; box-shadow: 0px -4px 0 var(--brass), -2px -2px 0 var(--brass), 0px -2px 0 var(--brass), 2px -2px 0 var(--brass), -4px 0px 0 var(--brass), -2px 0px 0 var(--brass), 0px 0px 0 var(--brass2), 2px 0px 0 var(--brass2), 4px 0px 0 var(--brass2), -2px 2px 0 var(--brass2), 0px 2px 0 var(--brass2), 2px 2px 0 var(--brass2), 0px 4px 0 var(--brass2);
+  filter: drop-shadow(2px 2px 0 var(--ink0)); }
+.nbs-tabs::before { left: -26px; }
+.nbs-tabs::after { right: -28px; }
+.nbs-tab, .nbs-tab.on { position: relative; height: 40px; margin: 0; padding: 0 14px; border: 0; border-image: none; background: none;
+  filter: none; transform: none; box-shadow: none; line-height: 40px; }
 .nbs-tab { color: var(--parch3); }
-.nbs-tab + .nbs-tab { box-shadow: -2px 0 0 var(--ink2); }
-.nbs-tab:hover { color: var(--parch); background: var(--ink2); }
-.nbs-tab.on { color: var(--brass); background: var(--ink2); box-shadow: inset 0 -4px 0 var(--brass2), inset 0 -6px 0 var(--ink0); }
-.nbs-tab:not(.on) .ic { filter: grayscale(.6) brightness(.8); }
-.nbs-tabs + .nbs-frame { padding-top: 12px; }
+.nbs-tab .ic { margin: 0; transition: none; }
+.nbs-tab:not(.on) .ic { opacity: .55; }
+/* rivet entre deux onglets */
+.nbs-tab + .nbs-tab::before { content: ""; position: absolute; left: -2px; top: 18px; width: 4px; height: 4px; background: var(--brass3);
+  box-shadow: 0 0 0 2px var(--ink0); }
+.nbs-tab:hover { color: var(--parch); }
+.nbs-tab:hover .ic { opacity: 1; }
+/* onglet actif : une gemme sertie, texte doré, liseré lumineux dessous */
+.nbs-tab.on { color: var(--brass); background: var(--plum);
+  box-shadow: inset 0 2px 0 var(--violet), inset 0 -2px 0 var(--ink0), 0 0 0 2px var(--ink0); }
+.nbs-tab.on::after { content: ""; position: absolute; left: 50%; bottom: -8px; width: 2px; height: 2px; margin-left: -1px;
+  box-shadow: 0 0 0 var(--brass), -2px -2px 0 var(--brass), 0 -2px 0 var(--brass), 2px -2px 0 var(--brass); }
+.nbs-tabs + .nbs-frame { padding-top: 30px; }
 .nbs-title { letter-spacing: 1px; }
 .nbs-hint:empty { display: none; }
+/* fenêtre étroite : les onglets ne gardent que leur icône (le nom reste en info-bulle) */
+@media (max-width: 900px) {
+  .nbs-tabs { max-width: calc(100% - 64px); }
+  .nbs-tab, .nbs-tab.on { font-size: 0; padding: 0 10px; }
+}
