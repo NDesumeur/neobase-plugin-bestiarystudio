@@ -1,7 +1,8 @@
 // NeoBestiary Studio : une description en français -> une créature pixel art 64x64, 4 directions, marche en 3 images.
 // La page parle au moteur (main.js -> engine/nb_server.py) ; tout le dessin de l'interface est dans ui/ (sprites faits main).
 const ID = 'neodex.bestiarystudio', U = 'neoplugin://' + ID + '/';
-const DIRS = ['bas', 'gauche', 'droite', 'haut'], FR = ['pas1', 'repos', 'pas2'], CYCLE = ['pas1', 'repos', 'pas2', 'repos'];
+const DIRS = ['bas', 'gauche', 'droite', 'haut'], FR = ['pas1', 'mi1', 'repos', 'mi2', 'pas2'], CYCLE = ['repos', 'mi1', 'pas1', 'mi1', 'repos', 'mi2', 'pas2', 'mi2'];
+const FRAME_NAME = { pas1: 'pas 1', mi1: 'demi-pas 1', repos: 'repos', mi2: 'demi-pas 2', pas2: 'pas 2' };
 const ARROW = { bas: '↓', gauche: '←', droite: '→', haut: '↑' };
 const ic = n => `<i class="ic" style="background-image:url(${U}ui/i_${n}.png)"></i>`;
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
@@ -144,7 +145,7 @@ const HTML = `<link rel="stylesheet" href="${U}ui/studio.css">
           <div class="nbs-canvas grid" id="cv"><canvas width="64" height="64" id="ed"></canvas></div>
           <div class="nbs-row" style="margin-top:14px">
             <button class="nbs-btn dark sq" id="fprev">${ic('prev')}</button>
-            <span class="nbs-num" id="fnum">1 / 12</span>
+            <span class="nbs-num" id="fnum">1 / 20</span>
             <button class="nbs-btn dark sq" id="fnext">${ic('next')}</button>
           </div>
         </div>
@@ -155,7 +156,7 @@ const HTML = `<link rel="stylesheet" href="${U}ui/studio.css">
           <div class="nbs-sep"></div>
           <div class="nbs-title">Réglages</div>
           <div class="nbs-opt" data-o="outline"><span class="nbs-check"></span>Contour sombre</div>
-          <div class="nbs-opt" data-o="lock_palette" style="margin-top:6px"><span class="nbs-check"></span>Palette verrouillée sur les 12 images</div>
+          <div class="nbs-opt" data-o="lock_palette" style="margin-top:6px"><span class="nbs-check"></span>Palette verrouillée sur les 20 images</div>
           <div class="nbs-opt" data-o="mirror" style="margin-top:6px"><span class="nbs-check"></span>Droite = miroir de gauche</div>
           <div class="nbs-opt" style="margin-top:6px">Couleurs <button class="nbs-btn dark sq" id="cminus">-</button><span class="nbs-num" id="cnum">24</span><button class="nbs-btn dark sq" id="cplus">+</button></div>
           <div class="nbs-sep"></div>
@@ -674,7 +675,7 @@ export default async function (ctx) {
   }
   function verTxt(d) {
     const f = S.sel.startsWith(d + '_') ? S.sel.slice(d.length + 1) : 'repos', v = S.cr.views[viewKey(d, f)];
-    return v && v.versions ? `${f === 'repos' ? 'vue' : f} v${v.version}/${v.versions}` : '—';
+    return v && v.versions ? `${f === 'repos' ? 'vue' : FRAME_NAME[f]} v${v.version}/${v.versions}` : '—';
   }
   $('#toLab').onclick = () => show('lab');
 
@@ -685,7 +686,7 @@ export default async function (ctx) {
   const anim = setInterval(() => {
     if (!view.isConnected) { clearInterval(anim); S.alive = false; return; }
     tick++;
-    if (S.cr) $$('img.w').forEach(i => { const s = sprite(i.dataset.d, CYCLE[tick % 4]); if (i.getAttribute('src') !== s) i.src = s; i.style.visibility = s ? '' : 'hidden'; });
+    if (S.cr) $$('img.w').forEach(i => { const s = sprite(i.dataset.d, CYCLE[tick % CYCLE.length]); if (i.getAttribute('src') !== s) i.src = s; i.style.visibility = s ? '' : 'hidden'; });
     if (S.cr && S.tab === 'dirs') { $$('.nbs-atk-cv').forEach(cv => drawAttack(cv, cv.dataset.n, cv.dataset.d, Math.min(3, tick % 7))); drawAnims(); }
     if (S.tab !== 'lab' || !S.cr) return;
     const fxImg = $('#heroFx');
@@ -705,13 +706,13 @@ export default async function (ctx) {
     if (k) {
       const [d, dx, dy] = KEYS[k];
       hero.d = d; hero.step++;
-      hero.x = Math.max(-32, Math.min(world.clientWidth - 96, hero.x + dx * 8));
-      hero.y = Math.max(-32, Math.min(world.clientHeight - 96, hero.y + dy * 8));
-    } else hero.step = 1;
-    const h = $('#hero'), s = sprite(hero.d, CYCLE[hero.step % 4]);
+      hero.x = Math.max(-32, Math.min(world.clientWidth - 96, hero.x + dx * 6));
+      hero.y = Math.max(-32, Math.min(world.clientHeight - 96, hero.y + dy * 6));
+    } else hero.step = 0;
+    const h = $('#hero'), s = sprite(hero.d, CYCLE[hero.step % CYCLE.length]);
     if (h.getAttribute('src') !== s) h.src = s;
     h.style.left = hero.x + 'px'; h.style.top = hero.y + 'px';
-  }, 150);
+  }, 110);
   const onKey = e => {
     if (!view.isConnected) { removeEventListener('keydown', onKey, true); removeEventListener('keyup', onUp, true); return; }
     if (S.tab !== 'lab' || /INPUT|TEXTAREA/.test(document.activeElement?.tagName)) return;
@@ -736,7 +737,7 @@ export default async function (ctx) {
   }
   const setLab = async opts => {
     if (!S.cr) return;
-    $('#expMsg').textContent = 'Recalcul des 12 images…';
+    $('#expMsg').textContent = 'Recalcul des 20 images…';
     try { refresh(await post('/lab', { slug: S.cr.slug, opts })); $('#expMsg').textContent = ''; } catch (e) { $('#expMsg').textContent = e.message; }
   };
   $$('.nbs-opt[data-o]').forEach(o => o.onclick = () => setLab({ [o.dataset.o]: !S.cr?.lab[o.dataset.o] }));
@@ -759,20 +760,20 @@ export default async function (ctx) {
   // ------------------------------------------------------------ sprite lab : éditeur pixel 64x64
   const cv = $('#ed'), g = cv.getContext('2d', { willReadFrequently: true });
   const ed = { tool: 'pen', color: '', undo: [], redo: [], down: false, dirty: false };
-  const KEYS12 = DIRS.flatMap(d => FR.map(f => d + '_' + f));
+  const ALL = DIRS.flatMap(d => FR.map(f => d + '_' + f));
   function setColor(c) { ed.color = c; $('#cur').style.background = c; $('#colorIn').value = c; $$('#sw i').forEach(i => i.classList.toggle('on', i.dataset.c === c)); }
   $('#colorIn').oninput = e => setColor(e.target.value);
   $$('#tools [data-t]').forEach(b => b.onclick = () => { ed.tool = b.dataset.t; $$('#tools [data-t]').forEach(x => x.classList.toggle('on', x === b)); });
   $('#gridBtn').onclick = () => { $('#cv').classList.toggle('grid'); $('#gridBtn').classList.toggle('on'); };
   $('#undo').onclick = () => undo();
   $('#redo').onclick = () => redo();
-  $('#fprev').onclick = () => { S.frame = (S.frame + 11) % 12; loadFrame(); };
-  $('#fnext').onclick = () => { S.frame = (S.frame + 1) % 12; loadFrame(); };
+  $('#fprev').onclick = () => { S.frame = (S.frame + ALL.length - 1) % ALL.length; loadFrame(); };
+  $('#fnext').onclick = () => { S.frame = (S.frame + 1) % ALL.length; loadFrame(); };
 
   function loadFrame() {
-    const key = KEYS12[S.frame], [d, f] = key.split('_');
-    $('#fnum').textContent = `${S.frame + 1} / 12`;
-    $('#fLabel').textContent = `${ARROW[d]} ${d} · ${f === 'repos' ? 'repos' : f === 'pas1' ? 'pas 1' : 'pas 2'}`;
+    const key = ALL[S.frame], [d, f] = key.split('_');
+    $('#fnum').textContent = `${S.frame + 1} / ${ALL.length}`;
+    $('#fLabel').textContent = `${ARROW[d]} ${d} · ${FRAME_NAME[f]}`;
     g.clearRect(0, 0, 64, 64);
     ed.undo = []; ed.redo = [];
     if (!S.cr) return;
@@ -830,7 +831,7 @@ export default async function (ctx) {
   function save() {  // chaque trait est gardé (retouche conservée même si on change les réglages ensuite)
     if (!ed.dirty || !S.cr) return;
     ed.dirty = false;
-    const png = cv.toDataURL('image/png'), key = KEYS12[S.frame], slug = S.cr.slug;
+    const png = cv.toDataURL('image/png'), key = ALL[S.frame], slug = S.cr.slug;
     saving = saving.then(() => post('/frame', { slug, key, png })).then(cr => { if (S.cr?.slug === slug) { S.cr = cr; S.stamp = Date.now(); renderSheet(); } })
       .catch(e => { $('#expMsg').textContent = e.message; });
   }

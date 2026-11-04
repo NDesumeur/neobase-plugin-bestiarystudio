@@ -13,7 +13,7 @@ import time
 import urllib.request
 from pathlib import Path
 
-from PIL import Image
+from PIL import Image, ImageOps
 
 HERE = Path(__file__).resolve().parent
 TOKEN = "test-jeton"
@@ -69,11 +69,11 @@ def main():
 
         _, c = call(port, "/creature?slug=" + slug)
         assert not c["pending"] and c["views"]["bas"]["version"] == 2, c["views"]["bas"]
-        assert len(c["sprites"]) == 12, c["sprites"]
+        assert len(c["sprites"]) == 20, c["sprites"]  # 4 directions x 5 images
         assert c["views"]["haut"]["versions"] == 2 and c["views"]["droite"]["file"], c["views"]
         code, png = call(port, f"/file?slug={slug}&path=sprites/sheet.png", raw=True)
         sheet = Image.open(io.BytesIO(png))
-        assert sheet.size == (192, 256), sheet.size
+        assert sheet.size == (320, 256), sheet.size
         assert call(port, f"/file?slug={slug}&path=../../config.json")[0] == 400, "sortie du dossier possible"
 
         _, c = call(port, "/choose", {"slug": slug, "key": "haut", "delta": 1})
@@ -128,6 +128,20 @@ def main():
         v = c["views"]["gauche"]
         assert v["versions"] == n + 1 and v["version"] == v["versions"], v  # la retouche devient la vue active
         assert c["views"]["droite"]["file"] and c["attack_fx"]["1"]["droite"], "le miroir et les attaques suivent"
+        # orientation : « à l'envers » de profil = miroir exact, sans le modèle ; de face = la vue refaite
+        _, before = call(port, f"/file?slug={slug}&path={v['file']}", raw=True)
+        assert call(port, "/edit", {"slug": slug, "key": "gauche", "instruction": "il est à l'envers"})[0] == 200
+        wait_job(port)
+        _, c = call(port, "/creature?slug=" + slug)
+        _, after = call(port, f"/file?slug={slug}&path={c['views']['gauche']['file']}", raw=True)
+        a, b = (Image.open(io.BytesIO(x)).convert("RGBA") for x in (before, after))
+        assert list(ImageOps.mirror(a).getdata()) == list(b.getdata()), "« à l'envers » n'a pas retourné le profil"
+        nb = c["views"]["bas"]["versions"]
+        assert call(port, "/edit", {"slug": slug, "key": "bas", "instruction": "il est pas de dos mais de face"})[0] == 200
+        wait_job(port)
+        _, c = call(port, "/creature?slug=" + slug)
+        assert c["views"]["bas"]["versions"] == nb + 1, c["views"]["bas"]
+        assert c["views"]["bas_mi1"]["file"] and len(c["sprites"]) == 20, "les demi-pas manquent"
         # portrait de combat, animations attente / dégâts / K.O., arene.json
         assert c["portrait"] and c["portrait_version"][1] >= 1, c["portrait"]
         _, png = call(port, f"/file?slug={slug}&path=sprites/portrait.png", raw=True)
@@ -216,7 +230,7 @@ def main():
             assert j["kind"] == "auto" and j["made"] >= 2, j
             done = [x for x in call(port, "/library")[1]]
             cs = [call(port, "/creature?slug=" + x["slug"])[1] for x in done]
-            assert len(cs) == j["made"] and all(not c_["pending"] and c_["lore"] and len(c_["sprites"]) == 12 for c_ in cs), len(cs)
+            assert len(cs) == j["made"] and all(not c_["pending"] and c_["lore"] and len(c_["sprites"]) == 20 for c_ in cs), len(cs)
             for x in done:
                 call(port, "/delete", {"slug": x["slug"]})
         if not real:  # contrôle automatique : l'esquisse à 1 tête est refaite, le profil avec pattes est refait

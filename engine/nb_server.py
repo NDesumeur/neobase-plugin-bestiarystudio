@@ -33,7 +33,9 @@ import nb_stats  # noqa: E402
 import nb_sprite as sp  # noqa: E402
 
 DIRS = ("bas", "gauche", "droite", "haut")
-FRAMES = ("pas1", "repos", "pas2")  # colonnes de la planche ; lecture : pas1, repos, pas2, repos
+FRAMES = ("pas1", "repos", "pas2", "mi1", "mi2")  # colonnes de la planche (repos reste en 2e colonne)
+WALK = ("pas1", "mi1", "repos", "mi2", "pas2")  # l'ordre des images rendues par generate_walk
+CYCLE = ["repos", "mi1", "pas1", "mi1", "repos", "mi2", "pas2", "mi2"]  # lecture de la marche
 CELL = 64
 PORTRAIT = 256  # portrait de combat, en pixels
 SKETCHES = 3  # esquisses du design proposées au choix avant le reste
@@ -631,8 +633,30 @@ class Studio:
         rec = self.lib.load(slug)
         frames = self.eng.generate_walk(c, self._active(slug, d), d, rec["description"], rec["seed"], progress, cancel,
                                         brief=rec.get("brief"))
-        self.lib.add_pil(slug, frame_key(d, "pas1"), frames[0], "marche")
-        self.lib.add_pil(slug, frame_key(d, "pas2"), frames[2], "marche")
+        self._store_walk(slug, d, frames)
+
+    def _store_walk(self, slug, d, frames):
+        for f, im in zip(WALK, frames):
+            if f != "repos":
+                self.lib.add_pil(slug, frame_key(d, f), im, "marche")
+
+    def _fill_walk(self, slug):
+        """Créatures d'avant les demi-pas : les images manquantes de la marche sont calculées (sans le modèle d'image)."""
+        rec = self.lib.load(slug)
+        for d in ("bas", "haut", "gauche", "droite"):
+            if self._active(slug, frame_key(d, "mi1")) is not None or self._active(slug, d) is None:
+                continue
+            if d == "droite" and rec.get("lab", LAB_DEFAULTS).get("mirror", True) and self._active(slug, "gauche") is not None:
+                self._mirror_walk(slug)
+                continue
+            view = self._active(slug, d)
+            src = ImageOps.mirror(view) if d == "droite" else view
+            frames = self.eng.generate_walk(None, src, "gauche" if d == "droite" else d, rec.get("description", ""),
+                                            rec.get("seed", 0), brief=rec.get("brief"))
+            frames = [ImageOps.mirror(f) for f in frames] if d == "droite" else frames
+            for f, im in zip(WALK, frames):
+                if f in ("mi1", "mi2"):
+                    self.lib.add_pil(slug, frame_key(d, f), im, "marche")
 
     def _mirror_walk(self, slug):
         """Droite = miroir de gauche (vue et pas), sauf si le Sprite Lab l'a désactivé."""
@@ -679,8 +703,7 @@ class Studio:
                 frames = [ImageOps.mirror(f) for f in frames]
             else:
                 frames = self.eng.generate_walk(c, im, d, rec["description"], seed, progress, cancel, brief=brief)
-            self.lib.add_pil(slug, frame_key(d, "pas1"), frames[0], "marche")
-            self.lib.add_pil(slug, frame_key(d, "pas2"), frames[2], "marche")
+            self._store_walk(slug, d, frames)
             if d == "gauche":
                 self._mirror_walk(slug)
             self.build_sprites(slug)
@@ -710,12 +733,30 @@ class Studio:
         if src is None or not Path(src).is_file():
             raise ValueError("Pas d'image à retoucher.")
         pending = not rec.get("views", {}).get("haut")
+        fix, rest = self.eng.orientation_fix(instruction, key) if zone is None else (None, instruction)
 
         def run(progress, cancel):
-            c = self.client()
-            im = self.eng.generate_edit(c, Image.open(src).convert("RGBA"), instruction, int(time.time()) % 1000000,
-                                        zone, progress, cancel)
-            self.lib.add_pil(slug, key, im, "retouche : " + instruction[:40])
+            seed = int(time.time()) % 1000000
+            im, notes = Image.open(src).convert("RGBA"), []
+            c = self.client() if fix == "regen" or rest else None
+            if fix == "mirror":
+                im = ImageOps.mirror(im)
+            elif fix == "flip":
+                im = ImageOps.flip(im)
+            elif fix == "regen":  # la vue refaite dans la bonne orientation, d'après la créature elle-même
+                brief = self._brief(slug)
+                legs = self.eng.has_legs(rec["description"], brief)
+                design = im if key == "bas" else self._active(slug, "bas")
+                refs = {"bas": [im], "haut": [ImageOps.mirror(design)],
+                        "gauche": [design] if legs or pending else [design, self._active(slug, "haut")]}[key]
+                im = self.eng.generate_facing(c, key, refs, seed, progress, cancel, legs=legs, brief=brief,
+                                              description=rec["description"])
+            if fix:
+                notes.append(self.eng.FIX_NOTE[key if fix == "regen" else fix])
+            if rest:
+                im = self.eng.generate_edit(c, im, rest, seed, zone, progress, cancel)
+                notes.append("retouche : " + rest[:40])
+            self.lib.add_pil(slug, key, im, " · ".join(notes))
             if pending:  # une esquisse de plus parmi lesquelles choisir
                 return slug
             self.lib.set_active(slug, key, 10 ** 6)
@@ -835,7 +876,8 @@ class Studio:
         return self.build_sprites(slug)
 
     def build_sprites(self, slug):
-        """12 images 64x64 (palette commune, même échelle, pieds alignés) + planche, retouches à la main conservées."""
+        """20 images 64x64 (palette commune, même échelle, pieds alignés) + planche, retouches à la main conservées."""
+        self._fill_walk(slug)
         rec = self.lib.load(slug)
         lab = dict(LAB_DEFAULTS)
         lab.update(rec.get("lab", {}))
@@ -984,7 +1026,7 @@ class Studio:
         meta = dict(
             format=1, slug=slug, nom=rec["name"], type=lore.get("type"), espece=lore.get("espece"),
             description=lore.get("description", ""), mis_a_jour=rec.get("updated", 0), case=CELL, directions=list(DIRS),
-            marche=dict(image="sheet.png", images=list(FRAMES), ordre=["pas1", "repos", "pas2", "repos"], ms=140),
+            marche=dict(image="sheet.png", images=list(FRAMES), ordre=CYCLE, ms=90),
             animations={n: dict(image=f"{n}.png", ms=list(t)) for n, t in nb_anim.ANIMS.items()},
             portrait=(sd / "portrait.png").is_file(),
             formes=[dict(id=f["id"], nom=f["nom"], dossier=f["dossier"], combat=f["combat"],
@@ -1034,8 +1076,8 @@ class Studio:
         sheet.save(out / f"{base}.png")
         meta = dict(
             name=rec["name"], image=f"{base}.png", frame_width=CELL, frame_height=CELL,
-            columns=len(FRAMES), rows=len(DIRS), anchor=[CELL // 2, CELL - 2], fps=8,
-            animation=["pas1", "repos", "pas2", "repos"],
+            columns=len(FRAMES), rows=len(DIRS), anchor=[CELL // 2, CELL - 2], fps=11,
+            animation=CYCLE,
             directions={d: dict(row=r, frames={f: dict(x=c * CELL, y=r * CELL) for c, f in enumerate(FRAMES)})
                         for r, d in enumerate(DIRS)},
             description=rec.get("description", ""), seed=rec.get("seed"), fiche=rec.get("lore"),

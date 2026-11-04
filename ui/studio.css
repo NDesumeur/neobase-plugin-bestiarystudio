@@ -105,9 +105,10 @@
 .nbs-grid4 { display: grid; grid-template-columns: repeat(2, 208px); gap: 20px 20px; }
 
 /* planche des directions */
-.nbs-sheet { display: grid; grid-template-columns: 120px repeat(3, 144px) auto; gap: 10px 12px; align-items: center; }
-.nbs-sheet .cell { position: relative; width: 144px; height: 144px; background: var(--ink1); box-shadow: 0 0 0 2px var(--ink0), 0 0 0 4px var(--plum); }
-.nbs-sheet .cell img { width: 128px; height: 128px; margin: 8px; }
+.nbs-sheet { display: grid; grid-template-columns: 110px repeat(5, 136px); gap: 10px 12px; align-items: center; }
+.nbs-sheet > .nbs-row { grid-column: 2 / -1; margin-bottom: 8px; }
+.nbs-sheet .cell { position: relative; width: 136px; height: 136px; background: var(--ink1); box-shadow: 0 0 0 2px var(--ink0), 0 0 0 4px var(--plum); }
+.nbs-sheet .cell img { width: 128px; height: 128px; margin: 4px; }
 .nbs-sheet .cell.sel { box-shadow: 0 0 0 2px var(--ink0), 0 0 0 4px var(--brass); }
 .nbs-sheet .lbl { color: var(--brass); text-shadow: 2px 2px 0 var(--ink0); display: flex; align-items: center; gap: 6px; }
 .nbs-ver { display: flex; align-items: center; gap: 4px; color: var(--parch2); }

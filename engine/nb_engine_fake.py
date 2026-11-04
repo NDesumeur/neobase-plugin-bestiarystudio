@@ -70,13 +70,24 @@ def generate_edit(client, image, instruction, seed, zone=None, progress=lambda m
     return out
 
 
+from nb_engine import orientation_fix, FIX_NOTE  # noqa: E402  (pur texte, sans GPU)
+
+
+def generate_facing(client, direction, refs, seed, progress=lambda m: None, cancel=lambda: False, legs=False, brief=None,
+                    description=""):
+    progress("Orientation")
+    return _blob(COLORS[direction], seed)
+
+
 def generate_walk(client, view, direction, description, seed, progress=lambda m: None, cancel=lambda: False, brief=None):
     if has_legs(description, brief):
         progress(f"Marche {direction} : pas 1")
         progress(f"Marche {direction} : pas 2")
-    up = Image.new("RGBA", view.size, (0, 0, 0, 0))
-    up.paste(view, (0, -8), view)
-    return [up, view.copy(), up.copy()]
+    def up(dy):
+        out = Image.new("RGBA", view.size, (0, 0, 0, 0))
+        out.paste(view, (0, -dy), view)
+        return out
+    return [up(8), up(4), view.copy(), up(4), up(8)]
 
 
 # plume factice (mêmes fonctions que nb_writer)

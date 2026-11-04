@@ -359,6 +359,86 @@ def zone_mask(size, x, y, radius):
     return out
 
 
+# --- corrections d'orientation : le modèle d'édition ne sait pas faire tourner une créature (« il est de dos, il doit
+# être de face » ne fait que repeindre). On reconnaît ces phrases et on agit nous-mêmes : miroir, retournement, ou la vue
+# refaite dans la bonne orientation, avec une consigne renforcée.
+_O = r"(?:vue? |vu |tourne(?:e)? )?de (face|dos|profil)"
+_FLIP = (r"\b(?:la )?tete en bas\b|\bsens dessus dessous\b|\b(?:les )?pattes en l'air\b|\bsur le dos\b"
+         r"|\ba l'envers (?:de haut en bas|verticalement)\b|\bretourne(?:e)? (?:de haut en bas|verticalement)\b")
+_MIRROR = (r"\bregarde (?:vers |a )?(?:la )?droite\b|\btourne(?:e)? vers la droite\b|\bla tete (?:a|vers la) droite\b"
+           r"|\ben miroir\b|\bde l'autre cote\b|\bmauvais cote\b")
+_ENVERS = r"\ba l'envers\b|\bretourne(?:e|-le|-la)?\b|\bdans le mauvais sens\b|\bdans l'autre sens\b|\binverse(?:e)?\b|\bmal oriente(?:e)?\b"
+_WANT = (r"(?:^|\bmais|\bdoit etre|\bdevrait etre|\bil faut (?:qu'(?:il|elle) soit|le mettre|la mettre)?|\bje (?:le |la )?veux"
+         r"|\bremets?(?:-le|-la| le| la)?|\bmets?(?:-le|-la| le| la)?|\bplutot|\bpas de \w+ mais)\s*" + _O)
+_NOT = r"(?:\bn'est pas|\best pas|\bpas|\bne doit pas etre|\bplus)\s+" + _O
+_SEEN = r"\bon (?:voit|apercoit|distingue) (?:bien |encore )?(?:son|le|ses|sa|les) (dos|visage|yeux|figure|face|museau|bouche)\b"
+_IS = r"\b(?:il|elle) est " + _O
+EXPECTED = {"bas": "face", "haut": "dos", "gauche": "profil"}
+FIX_NOTE = {"mirror": "retournée en miroir", "flip": "remise à l'endroit", "bas": "remise de face", "haut": "remise de dos",
+            "gauche": "remise de profil"}
+
+
+def orientation_fix(instruction, key):
+    """Ce qu'une retouche demande pour l'orientation de la vue key (bas = face, haut = dos, gauche = profil tête à gauche).
+    Rend (action, reste) : action = "mirror" | "flip" | "regen" | None ; reste = la retouche ordinaire qui reste à faire."""
+    re = nb_core.re
+    t = nb_core.fold(instruction)
+    spans, wrong, want = [], set(), None
+
+    def grab(pat):
+        found = list(re.finditer(pat, t))
+        spans.extend(m.span() for m in found)
+        return found
+    flip = bool(grab(_FLIP))
+    mirror = bool(grab(_MIRROR))
+    for m in grab(_WANT):
+        want = m.group(1)
+    for m in grab(_NOT):
+        wrong.add(m.group(1))
+    for m in grab(_SEEN):
+        wrong.add("dos" if m.group(1) == "dos" else "face")
+    for m in grab(_IS):
+        if m.group(1) != EXPECTED.get(key):
+            wrong.add(m.group(1))
+    envers = bool(grab(_ENVERS))
+    wrong.discard(want)
+    exp = EXPECTED.get(key)
+    if flip:
+        action = "flip"
+    elif key == "gauche":
+        if wrong & {"face", "dos"} or (want == "profil" and not mirror):
+            action = "regen"
+        elif mirror or envers:
+            action = "mirror"
+        else:
+            action = None
+    elif key in ("bas", "haut"):
+        action = "regen" if (envers or wrong or want == exp or (want and want != exp)) else None
+    else:
+        action = None
+    if action is None:
+        return None, instruction.strip()
+    keep = [c for i, c in enumerate(t) if not any(a <= i < b for a, b in spans)]
+    rest = re.sub(r"\s+", " ", "".join(keep))
+    rest = re.sub(r"^(?:[\s,.;:!-]|\b(?:il|elle|est|mais|et|c'est|non|pas|alors|donc|stp|svp)\b)+", "", rest)
+    rest = re.sub(r"(?:[\s,.;:!-]|\b(?:il|elle|est|mais|et|pas)\b)+$", "", rest)
+    return action, (rest if len(re.findall(r"[a-z]{3,}", rest)) >= 2 else "")
+
+
+def generate_facing(client, direction, refs, seed, progress=lambda m: None, cancel=lambda: False, legs=False, brief=None,
+                    description=""):
+    """La vue refaite dans la bonne orientation : consigne d'orientation renforcée, 2 essais, le mieux noté gardé."""
+    insist = {"bas": " The previous picture wrongly showed it from behind or from the side: this time it must face the "
+                     "viewer, its face and eyes clearly visible, toward the bottom of the screen.",
+              "haut": " The previous picture wrongly showed its face: this time we must see only its back and the back of "
+                      "its head, with no eyes and no face visible.",
+              "gauche": " The previous picture was not a clean side view: this time show a pure side profile, its head "
+                        "pointing to the left edge of the screen."}[direction]
+    prompt = (STYLE + " " if direction == "bas" else "") + view_prompt(direction, legs, brief, description) + insist
+    return _best(client, prompt, refs, direction, seed, 2, cancel, progress, "Orientation",
+                 (brief or {}).get("posture", ""))[0]
+
+
 def generate_edit(client, image, instruction, seed, zone=None, progress=lambda m: None, cancel=lambda: False):
     """Retouche : zone = (x, y, rayon) en fractions -> seule cette zone est redessinée ; None -> toute la créature,
     éditée d'après elle-même (« les yeux en rouge »)."""
@@ -464,13 +544,13 @@ def has_legs(description, brief=None):
 
 
 def bob(im, phase):
-    """Rebond procédural : phase -1/+1 = la créature se tasse un peu et descend, 0 = repos."""
+    """Rebond procédural : phase -1/+1 = la créature se tasse un peu et descend, ±0.5 = à moitié, 0 = repos."""
     if not phase:
         return im.copy()
     w, h = im.size
     box = im.getbbox() or (0, 0, w, h)
     ch = box[3] - box[1]
-    squash = max(1, round(ch * 0.04))
+    squash = max(1, round(ch * 0.04 * abs(phase)))
     body = im.crop(box).resize((box[2] - box[0], ch - squash), Image.Resampling.NEAREST)
     out = Image.new("RGBA", im.size, (0, 0, 0, 0))
     out.paste(body, (box[0], box[1] + squash))
@@ -593,8 +673,9 @@ def leg_zone(im):
 def step_frame(im, direction, phase):
     """Un pas procédural à partir de la pose de repos : mêmes pixels, seules les pattes bougent.
 
-    face / dos : les pattes d'un côté se lèvent (phase +1 = côté gauche de l'image, -1 = droit).
+    face / dos : les pattes d'un côté se lèvent (phase +1 = côté gauche de l'image, -1 = droit ; ±0.5 = demi-pas).
     profil (tête à gauche) : pattes avant et arrière se balancent en sens opposé (cisaillement du bas des pattes).
+    Au pas complet, le corps descend d'un pixel (appui) : la marche se lit mieux.
     """
     im = im.convert("RGBA")
     top, box = leg_zone(im)
@@ -609,10 +690,11 @@ def step_frame(im, direction, phase):
     out = Image.new("RGBA", im.size, (0, 0, 0, 0))
     mid = (x0 + x1) // 2
     if direction in ("bas", "haut"):
-        lift = max(2, round(h * .045))
+        lift = max(1, round(h * .045 * abs(phase)))
+        up = 1 if phase > 0 else -1
         for side, (a, b) in ((1, (0, mid)), (-1, (mid, im.width))):
             part = legs.crop((a, 0, b, im.height))
-            out.alpha_composite(part, (a, -lift if side == phase else 0))
+            out.alpha_composite(part, (a, -lift if side == up else 0))
     else:
         swing = max(2, round(zh * .32))
         for front, (a, b) in ((True, (0, mid)), (False, (mid, im.width))):  # tête à gauche : l'avant est à gauche
@@ -624,7 +706,7 @@ def step_frame(im, direction, phase):
                 row = part.crop((0, y, part.width, y + 1))
                 sheared.paste(row, (dx, y), row)  # paste accepte un décalage négatif
             out.alpha_composite(sheared, (a, 0))
-    out.alpha_composite(body)  # le corps passe devant le haut des pattes
+    out.alpha_composite(body, (0, 1 if abs(phase) >= 1 and h >= 24 else 0))  # le corps passe devant le haut des pattes
     return out
 
 
@@ -688,13 +770,15 @@ def _rescale(im, sx, sy):
 
 
 def hop(im, direction, phase):
-    """Bond : +1 accroupi (tassé, élargi), -1 en extension (étiré, aminci)."""
-    return _rescale(im, 1.06, .9) if phase > 0 else _rescale(im, .95, 1.08) if phase < 0 else im.copy()
+    """Bond : +1 accroupi (tassé, élargi), -1 en extension (étiré, aminci) ; ±0.5 à mi-chemin."""
+    t = abs(phase)
+    return _rescale(im, 1 + .06 * t, 1 - .1 * t) if phase > 0 else _rescale(im, 1 - .05 * t, 1 + .08 * t) if phase < 0 else im.copy()
 
 
 def jelly(im, direction, phase):
     """Gelée : elle s'étale puis se resserre en glissant."""
-    return _rescale(im, 1.08, .92) if phase > 0 else _rescale(im, .96, 1.05) if phase < 0 else im.copy()
+    t = abs(phase)
+    return _rescale(im, 1 + .08 * t, 1 - .08 * t) if phase > 0 else _rescale(im, 1 - .04 * t, 1 + .05 * t) if phase < 0 else im.copy()
 
 
 def roll(im, direction, phase):
@@ -707,7 +791,7 @@ def roll(im, direction, phase):
     if direction not in ("bas", "haut"):
         return im.rotate(25 * phase, Image.Resampling.NEAREST, center=(cx, cy))
     part = im.crop(box)
-    k = max(1, round(part.height * .12)) * phase
+    k = max(1, round(part.height * .12 * abs(phase))) * (1 if phase > 0 else -1)
     rgb = ImageChops.offset(part, 0, k)  # la texture défile (en boucle), la silhouette reste
     rgb.putalpha(part.getchannel("A"))
     out = Image.new("RGBA", im.size, (0, 0, 0, 0))
@@ -743,19 +827,22 @@ def motion(description, brief=None):
     return None
 
 
+WALK_PHASES = (1, .5, 0, -.5, -1)  # pas A, demi-pas A, repos, demi-pas B, pas B
+
+
 def generate_walk(client, view, direction, description, seed, progress=lambda m: None, cancel=lambda: False, brief=None):
-    """3 images : pas A, repos, pas B (lecture A, repos, B, repos). droite : miroir de la marche gauche.
+    """5 images : pas A, demi-pas A, repos, demi-pas B, pas B (lecture repos, ½A, A, ½A, repos, ½B, B, ½B).
+    droite : miroir de la marche gauche.
 
     Les pas sont calculés depuis la pose de repos (pas redessinés par le modèle) : les pattes restent nettes et la
-    créature identique d'une image à l'autre. Sans pattes (œil, blob, serpent) : rebond."""
-    move = motion(description, brief)
-    if move:
-        return [move(view, direction, 1), view.copy(), move(view, direction, -1)]
-    return [step_frame(view, direction, 1), view.copy(), step_frame(view, direction, -1)]
+    créature identique d'une image à l'autre. Les demi-pas rendent le mouvement fluide. Sans pattes (œil, blob,
+    serpent) : rebond, ondulation… selon la posture."""
+    move = motion(description, brief) or step_frame
+    return [view.copy() if not p else move(view, direction, p) for p in WALK_PHASES]
 
 
 def generate_creature(client, description, seed, progress=lambda m: None, cancel=lambda: False):
-    """Tout d'un coup : {"design", "directions": {d: [versions]}, "walk": {d: [3 images]}}."""
+    """Tout d'un coup : {"design", "directions": {d: [versions]}, "walk": {d: [5 images]}}."""
     design = generate_design(client, description, seed, progress, cancel)
     dirs = generate_directions(client, design, seed, progress, cancel, legs=has_legs(description))
     walk = {}
