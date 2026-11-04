@@ -11,6 +11,7 @@ import hashlib
 from PIL import Image
 
 import nb_attack
+import nb_moves
 import nb_stats
 
 ELEMENTS = tuple(nb_attack.PALETTE)
@@ -107,8 +108,21 @@ def card(base, vid):
         out["rarete"] = nb_stats.RARITIES[min(i + 1, len(nb_stats.RARITIES) - 1)]
         return out
     out.update(nb_stats.weaknesses(vid))
+    keys = ("coups", "critique", "drain", "effets", "precision", "priorite", "purge", "recul", "soin", "statut")
     for a in out["attaques"]:
         a["element"] = vid
+        old, tech = nb_moves.CATALOG.get(tuple(a.get("id", ":").split(":"))), nb_moves.get(vid, a["genre"])
+        if old and tech:  # la technique du même geste dans le nouvel élément (statut, effets…)
+            if a["nom"] == old["nom"]:
+                a["nom"] = tech["nom"]
+            if old["force"]:
+                a["puissance"] = round(a["puissance"] * tech["force"] / old["force"])
+            for k in keys:
+                a.pop(k, None)
+            a.update({k: v for k, v in tech.items() if k in keys}, id=tech["id"], technique=tech["nom"],
+                     effet_texte=nb_moves.describe(tech))
+            if a["genre"] == "soin":
+                a["effet"] = dict(soin=tech["soin"])
     return out
 
 
@@ -128,4 +142,6 @@ if __name__ == "__main__":
     assert card(base, "glace")["faiblesses"] == ["feu", "roche", "acier"] and card(base, "glace")["attaques"][0]["element"] == "glace"
     assert nb_stats.RARITIES.index(card(base, "chromatique")["rarete"]) >= nb_stats.RARITIES.index(base["rarete"])
     assert label("eau") == "d'eau" and label("glace") == "de glace"
+    g = card(base, "glace")["attaques"][0]
+    assert g["id"] == "glace:morsure" and g["technique"] == "Croc glacé" and g["statut"]["nom"] == "peur", g
     print("ok")

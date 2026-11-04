@@ -446,7 +446,9 @@ export default async function (ctx) {
     projectile: 'projectile', souffle: 'souffle', rayon: 'rayon', cri: 'cri', rafale: 'rafale', pluie: 'pluie', onde: 'onde',
     explosion: 'explosion', soin: 'soin', renfort: 'renfort' };
   const STATUT = { 'brûlure': 'brûle', poison: 'empoisonne', gel: 'gèle', paralysie: 'paralyse' };
-  const moveExtra = a => a.effet?.soin ? `<span class="nbs-pow">soigne ${a.effet.soin} % des PV</span>`
+  const moveExtra = a => a.effet_texte != null  // catalogue des 204 attaques : la mécanique en clair
+    ? `${a.puissance ? `<span class="nbs-pow">puissance ${a.puissance}</span> ` : ''}<span class="nbs-pow" title="${esc(a.technique || '')}">${a.puissance && a.effet_texte ? '· ' : ''}${esc(a.effet_texte)}</span>`
+    : a.effet?.soin ? `<span class="nbs-pow">soigne ${a.effet.soin} % des PV</span>`
     : a.effet?.attaque ? `<span class="nbs-pow">attaque +${a.effet.attaque} %</span>`
     : `<span class="nbs-pow">puissance ${a.puissance}</span>${a.statut ? ` <span class="nbs-pow">· ${STATUT[a.statut.nom] || esc(a.statut.nom)} (${a.statut.chance} %)</span>` : ''}`;
   function combat(k, portrait) {

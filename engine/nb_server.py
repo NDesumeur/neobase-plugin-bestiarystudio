@@ -127,6 +127,30 @@ class Studio:
             import nb_engine as eng
             import nb_writer as writer
         self.eng, self.writer = eng, writer
+        self.upgrade_cards()
+
+    def upgrade_cards(self):
+        """Les fiches d'avant le catalogue des 204 attaques reçoivent leur mécanique (mêmes gestes, mêmes noms)."""
+        done = 0
+        for rec in self.lib.list():
+            card = (rec.get("lore") or {}).get("combat")
+            if not card or all("id" in a for a in card.get("attaques", [])):
+                continue
+            fixed = rec.get("rarete_fixe")
+            rec["rarete_fixe"] = card["rarete"]  # même rareté, donc mêmes gestes : les animations restent valables
+            new = self._card(rec)
+            new["rarete_fixe"] = bool(fixed)
+            rec["rarete_fixe"] = fixed
+            rec["lore"]["combat"] = new
+            self.lib.save(rec)
+            if [a["genre"] for a in new["attaques"]] != [a.get("genre") for a in card.get("attaques", [])]:
+                self.build_attacks(rec["slug"])  # un geste a changé (règles plus récentes) : ses animations aussi
+            elif (self.lib.dir(rec["slug"]) / "arene.json").is_file():
+                self._arena(rec["slug"])
+            done += 1
+        if done:
+            print(f"{done} fiche(s) de combat mises à jour (catalogue des attaques)")
+        return done
 
     # ---------------------------------------------------------------- état
     def client(self):
@@ -482,6 +506,17 @@ class Studio:
             return slug
         return self.jobs.start("sketch", run, SKETCHES + 3, slug), slug
 
+    def _pick_type(self, rec, lore):
+        """Le type : ce que la plume propose, les mots de la description, et les types qui manquent au bestiaire."""
+        counts = {}
+        for r in self.lib.list():
+            t = (r.get("lore") or {}).get("type")
+            if t and r.get("slug") != rec["slug"]:
+                counts[t] = counts.get(t, 0) + 1
+        text = " ".join(str(lore.get(k, "")) for k in ("espece", "habitat", "description", "histoire"))
+        return nb_stats.choose_type(rec.get("description", ""), text, lore.get("types_proposes", [lore.get("type")]),
+                                    counts)
+
     def _mix_lore(self, rec, lore):
         """Un hybride hérite : le type de l'un de ses parents, une attaque de chacun, la menace du plus fort."""
         parents = [self.lib.load(p) for p in rec.get("parents", [])]
@@ -602,7 +637,9 @@ class Studio:
         if not self.jobs.get()["running"] or self.jobs.get()["slug"] == slug:
             self._free_gpu()
         rec = self.lib.load(slug)
-        rec["lore"] = self._mix_lore(rec, self.writer.lore(rec["name"], rec.get("description", ""), int(time.time()) % 100000))
+        lore = self.writer.lore(rec["name"], rec.get("description", ""), int(time.time()) % 100000)
+        lore["type"] = self._pick_type(rec, lore)
+        rec["lore"] = self._mix_lore(rec, lore)
         rec["lore"]["combat"] = self._card(rec)
         self.lib.save(rec)
         self.build_attacks(slug)

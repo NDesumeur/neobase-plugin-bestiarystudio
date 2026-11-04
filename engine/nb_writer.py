@@ -302,7 +302,9 @@ def match(images, text, keep_alive=0):
 def lore(name, description, seed=1):
     """Fiche façon Pokédex : type, espèce, taille, poids, habitat, description, histoire."""
     prompt = (f"Créature : « {name} » — {description}\n\nRédige sa fiche en JSON avec exactement ces clés :\n"
-              f"\"type\" (un seul mot parmi : {', '.join(TYPES)}),\n"
+              f"\"types\" (liste de 2 ou 3 types qui lui vont, du plus au moins évident, parmi : "
+              f"{'; '.join(f'{t} = {d}' for t, d in nb_stats.TYPE_FR.items())}. Pars de son corps, de sa matière et de "
+              f"son milieu ; ombre et esprit seulement si elle est vraiment nocturne, spectrale ou psychique),\n"
               "\"espece\" (« la créature … » en 2 à 4 mots, comme « le Pokémon Graine »),\n"
               "\"taille\" (en mètres, ex. « 1,2 m »),\n\"poids\" (ex. « 85 kg »),\n\"habitat\" (une phrase),\n"
               "\"description\" (2 phrases, comme un naturaliste qui l'a observée : son allure ET son comportement "
@@ -323,9 +325,11 @@ def lore(name, description, seed=1):
               f"évocateur en français, \"genre\": un mot parmi {', '.join(nb_stats.GENRES)}, \"element\": un mot parmi "
               f"{', '.join(TYPES)}, \"description\": une phrase qui décrit le geste}}).")
     out = _ask(SYS_LORE, prompt, seed)
-    fiche = {k: _clean(out.get(k)) for k in ("type", "espece", "taille", "poids", "habitat", "description", "histoire")}
-    t = fiche["type"].lower()
-    fiche["type"] = t if t in TYPES else next((x for x in TYPES if x in t), "esprit")
+    types = out.get("types") if isinstance(out.get("types"), list) else [out.get("type")]
+    types = [t for t in (_clean(x, 20).lower() for x in types if isinstance(x, str)) if t in TYPES]
+    fiche = {k: _clean(out.get(k)) for k in ("espece", "taille", "poids", "habitat", "description", "histoire")}
+    fiche["type"] = types[0] if types else "esprit"
+    fiche["types_proposes"] = types  # le serveur tranche avec la description et l'équilibre du bestiaire
     fiche["menace"] = out.get("menace", 3)
     try:
         fiche["prestige"] = max(0, min(100, int(out.get("prestige"))))

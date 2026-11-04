@@ -12,6 +12,8 @@ import hashlib
 import random
 import re
 
+import nb_moves
+
 RARITIES = ("commun", "peu commun", "rare", "épique", "légendaire")
 WEIGHTS = (50, 28, 14, 6, 2)  # sur 100 créatures : ~2 légendaires
 THRESHOLDS = (40, 60, 75, 88)  # prestige -> rareté, tant que le bestiaire est trop petit pour un classement
@@ -40,8 +42,7 @@ BODY = (("tail", "fouet"), ("horn", "corne"), ("tusk", "corne"), ("sting", "dard
         ("talon", "griffe"), ("vine", "fouet"))
 BY_TYPE = {"feu": "souffle", "eau": "projectile", "plante": "fouet", "vent": "rafale", "roche": "pluie", "glace": "pluie",
            "foudre": "rayon", "lumière": "rayon", "ombre": "onde", "esprit": "cri", "acier": "charge", "poison": "dard"}
-# élément -> statut infligé (chance selon l'attaque)
-STATUS = {"feu": "brûlure", "poison": "poison", "glace": "gel", "foudre": "paralysie"}
+STATUS = nb_moves.STATUS_OF  # élément -> statut infligé (la chance dépend de l'attaque : voir nb_moves)
 
 # type -> (faiblesses, résistances)
 CHART = {
@@ -68,6 +69,59 @@ LEAN = {"feu": {"attaque": 1.25}, "eau": {"pv": 1.2}, "plante": {"pv": 1.2, "def
 POSTURE_LEAN = {"flotte": {"vitesse": 1.2, "defense": .9}, "vole": {"vitesse": 1.2, "defense": .9}, "rampe": {"vitesse": .85},
                 "sautille": {"vitesse": 1.15}, "roule": {"defense": 1.15}, "glisse": {"pv": 1.2, "vitesse": .8},
                 "enracine": {"defense": 1.3, "pv": 1.1, "vitesse": .6}, "nage": {"vitesse": 1.1}}
+# ce que chaque type veut dire (pour la plume) et les mots qui le trahissent dans une description
+TYPE_FR = {
+    "feu": "flammes, lave, volcans, braises, chaleur, dragons cracheurs", "eau": "mer, rivières, poissons, coquillages, nage",
+    "plante": "végétaux, fleurs, champignons, mousse, forêts, racines", "vent": "oiseaux, ailes, plumes, ciel, tempêtes, vol",
+    "roche": "pierre, montagnes, cristaux bruts, carapaces minérales, grottes, terre",
+    "glace": "froid, neige, givre, banquise, hiver", "foudre": "électricité, orage, éclairs, étincelles",
+    "lumière": "soleil, aube, sacré, anges, éclat, or", "ombre": "nuit, ténèbres, cauchemars, prédateurs nocturnes",
+    "esprit": "fantômes, âmes, magie de l'esprit, rêves, psychique", "acier": "métal, armures, machines, lames, rouages",
+    "poison": "venin, toxines, marais putrides, acide, insectes piqueurs",
+}
+KEYWORDS = {
+    "feu": r"feu|flamm|braise|brasier|lave|volcan|ardent|incandesc|brûl|cendre|fournaise|soufre|magma|chaleur|phénix|salamandre",
+    "eau": r"\beau\b|mer\b|marin|océan|rivière|lac\b|poisson|nage|nageoire|écaille|coquill|crabe|pieuvre|corail|vague|aquat|requin|baleine|grenouill|algue",
+    "plante": r"plante|fleur|feuill|racine|champignon|mousse|liane|arbre|écorce|bois\b|forêt|pétale|graine|bourgeon|ronce|épine|sève|lierre|cactus",
+    "vent": r"vent|aile|plume|oiseau|ciel|nuage|tempête|tornade|vol\b|vole|aigle|chouette|hibou|corbeau|harpie|griffon|bec\b",
+    "roche": r"roche|rocher|pierre|granit|caillou|montagne|grotte|cristal|gemme|golem|sable|terre\b|argile|boue|fossile|minéral|basalte",
+    "glace": r"glace|givr|neige|gel[ée]?\b|froid|hiver|banquise|polaire|blizzard|yéti|stalact|frimas|boréal",
+    "foudre": r"foudre|éclair|électri|orage|tonnerre|étincel|voltaï|statique|anguille",
+    "lumière": r"lumi|soleil|solaire|aube|aurore|doré|\bor\b|sacré|divin|ange|halo|étoile|céleste|radieu|éclat",
+    "ombre": r"ombre|ténèbr|nuit|noctur|obscur|cauchemar|sombre|noir|vampire|chauve-souris|corbeau|loup-garou|démon",
+    "esprit": r"esprit|fantôme|spectr|âme|psych|rêve|songe|astral|hant|ectoplasm|mage|magie|illusion|médium|feu follet",
+    "acier": r"acier|métal|fer\b|armure|lame|rouage|engrenage|machine|mécani|automate|chaîne|cuivre|bronze|robot",
+    "poison": r"poison|venin|venim|toxi|acide|putri|pourri|marais|vase|limace|scorpion|araignée|crapaud|miasme|bave|guêpe|frelon",
+}
+
+
+def type_scores(text):
+    text = str(text or "").lower()
+    return {t: len(re.findall(r"\b(?:" + KEYWORDS[t] + ")", text)) for t in KEYWORDS}  # début de mot : « étrange » n'est pas un ange
+
+
+def choose_type(description, lore_text="", proposed=(), counts=None):
+    """Le type de la créature. La plume en propose (du plus au moins crédible) ; les mots de la description comptent
+    triple. Quand plusieurs types se valent, celui qui manque au bestiaire l'emporte : la plume choisit sinon
+    presque toujours ombre ou esprit, et certains types n'apparaissent jamais."""
+    score = {t: 0.0 for t in CHART}
+    for t, n in type_scores(description).items():
+        score[t] += 3 * min(n, 3)
+    for t, n in type_scores(lore_text).items():
+        score[t] += min(n, 3)
+    for i, t in enumerate(p for p in proposed if p in CHART):
+        score[t] += (3, 2, 1)[i] if i < 3 else 0
+    counts = counts or {}
+    total = sum(counts.values()) or 1
+    share = {t: counts.get(t, 0) / total for t in CHART}
+    best = max(score.values())
+    if best <= 0:  # rien ne parle de type : le moins représenté (jamais « esprit » par défaut)
+        return min(CHART, key=lambda t: (share[t], t == "esprit", t))
+    near = [t for t in CHART if score[t] >= best - 1.5 and score[t] > 0]
+    # entre types qui se valent : le moins représenté, avec un léger avantage au score
+    return max(near, key=lambda t: (score[t] - 6 * share[t], -share[t]))
+
+
 TOP = (50, 22, 8, 2)  # % du haut du classement : peu commun et mieux, rare et mieux, épique et mieux, légendaire
 
 
@@ -170,7 +224,7 @@ def pick_moves(written, count, typ, anatomy=()):
     while len(chosen) < min(count, 2):  # la plume en a écrit trop peu
         g = next(g for g in opts if g not in used)
         used.add(g)
-        chosen.append(dict(nom=GENRE_FR[g].split(" (")[0].capitalize(), genre=g, description=""))
+        chosen.append(dict(nom="", genre=g, description=""))  # nom : celui du catalogue
     if chosen and chosen[0]["genre"] in SUPPORT and len(chosen) > 1:  # pas de soin pour ouvrir
         chosen.append(chosen.pop(0))
     kinds = {portee(a["genre"]) for a in chosen}
@@ -195,17 +249,16 @@ def card(key, fiche, posture="", fixed=None, others=(), anatomy=()):
     for i, a in enumerate(picked):
         genre = a["genre"]
         elem = a.get("element") if a.get("element") in CHART else typ
-        m = dict(nom=a.get("nom") or GENRE_FR[genre].capitalize(), genre=genre, element=elem,
-                 description=a.get("description", ""), puissance=attack_power(key, i, rare, genre, len(picked)),
-                 portee=portee(genre))
+        tech = nb_moves.get(elem, genre)  # la mécanique : statut, baisses de stats, précision, coups multiples…
+        power = attack_power(key, i, rare, genre, len(picked))
+        m = dict(nom=a.get("nom") or tech["nom"], genre=genre, element=elem, description=a.get("description", ""),
+                 puissance=round(power * tech["force"]), portee=portee(genre), technique=tech["nom"], id=tech["id"])
+        m.update({k: v for k, v in tech.items() if k not in ("id", "nom", "element", "genre", "force")})
+        m["effet_texte"] = nb_moves.describe(tech)
         if genre == "soin":
-            m["effet"] = dict(soin=35)  # % des PV max
+            m["effet"] = dict(soin=tech["soin"])  # % des PV max (anciennes versions de l'Arène)
         elif genre == "renfort":
-            m["effet"] = dict(attaque=30)  # % d'attaque en plus (cumulable 2 fois)
-        else:
-            status = "poison" if genre == "dard" else STATUS.get(elem)
-            if status:
-                m["statut"] = dict(nom=status, chance=30 if i == len(picked) - 1 or genre == "dard" else 20)
+            m["effet"] = dict(attaque=30)  # % d'attaque en plus (anciennes versions de l'Arène)
         moves.append(m)
     return dict(rarete=rare, rarete_fixe=fixed in RARITIES, prestige=prestige,
                 stats=stats(key, rare, typ, posture, fiche.get("poids"), fiche.get("taille")),
@@ -241,4 +294,13 @@ if __name__ == "__main__":
         kinds = {portee(m["genre"]) for m in ms}
         assert kinds & {"distance", "zone"} and "contact" in kinds, ms
     assert len(pick_moves([], 2, "eau")) == 2
+    gel = card("yeti", dict(type="glace", prestige=50, attaques=[dict(nom="Coup", genre="griffe"), dict(nom="Givre", genre="souffle")]))["attaques"]
+    assert any(a.get("statut", {}).get("nom") == "gel" for a in gel) and gel[1]["precision"] == 90, gel
+    assert card("x", dict(type="eau", attaques=[]))["attaques"][0]["nom"] in [m["nom"] for m in nb_moves.CATALOG.values()]
+    lib = dict(ombre=24, esprit=21, eau=19, plante=15, feu=10, poison=4, roche=2)
+    assert choose_type("un golem de pierre et de cristal", proposed=["esprit"], counts=lib) == "roche"
+    assert choose_type("une créature étrange", proposed=["ombre", "glace"], counts=lib) == "glace"
+    assert choose_type("un oiseau d'orage aux plumes qui crépitent d'éclairs", proposed=["vent", "foudre"], counts=lib) in ("vent", "foudre")
+    assert choose_type("une chose", counts=lib) not in lib
+    assert choose_type("un dragon de lave", proposed=["ombre"], counts=lib) == "feu"  # le texte prime
     print("ok", dict(c), dict(tiers), k["rarete"], genres)
