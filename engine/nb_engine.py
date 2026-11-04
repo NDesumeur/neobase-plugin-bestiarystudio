@@ -33,7 +33,9 @@ FACING = {
             "on the vertical axis of the image, not turned to the left or to the right at all."),
     "haut": ("Show this exact same creature seen exactly from behind: it walks straight up toward the top of the screen, "
              "perfectly symmetrical, its body aligned on the vertical axis, not turned to either side. We see its back "
-             "and the back of its head; no face and no eyes are visible."),
+             "and the back of its head; no face and no eyes are visible. The reference image is already flipped "
+             "left-right as seen from behind: keep every limb, wing, weapon and held object on the same side of the "
+             "image as in the reference."),
     "gauche": ("Turn this exact same creature a full 90 degrees so it faces exactly toward the left edge of the screen: "
                "a pure side profile, in exactly the same posture as in the reference image{posture}, its face pointing left, "
                "nothing of it turned toward the viewer."),
@@ -380,11 +382,29 @@ def bob(im, phase):
     return out
 
 
-def hover(im, phase):
-    """Une créature qui flotte ne se tasse pas : elle monte et descend doucement."""
+def has_wings(description, brief=None):
+    text = " ".join([description, (brief or {}).get("en", "")] + list((brief or {}).get("anatomie", []))).lower()
+    return "wing" in text or "aile" in text
+
+
+def flap(im, direction, phase):
+    """Battement d'ailes : les colonnes hors du tronc montent (phase +1) ou descendent (-1), d'autant plus qu'elles
+    sont loin du tronc. Face / dos : les deux côtés ; profil (tête à gauche) : seulement l'arrière, où sont les ailes."""
+    im = im.convert("RGBA")
+    box = im.getbbox()
+    if not box or not phase:
+        return im.copy()
+    x0, y0, x1, y1 = box
+    w, h = x1 - x0, y1 - y0
+    mid = (x0 + x1) / 2
+    # shortcut: tronc = 36 % central de la largeur (face) ou moitié avant (profil), sans détecter les ailes
+    body, reach = (w * .18, w / 2 - w * .18) if direction in ("bas", "haut") else (w * .1, w / 2 - w * .1)
+    amp = max(2, round(h * .07))
     out = Image.new("RGBA", im.size, (0, 0, 0, 0))
-    box = im.getbbox() or (0, 0, *im.size)
-    out.alpha_composite(im, (0, -phase * max(1, round((box[3] - box[1]) * .03))))
+    for x in range(x0, x1):
+        d = (abs(x + .5 - mid) if direction in ("bas", "haut") else x + .5 - mid) - body
+        col = im.crop((x, 0, x + 1, im.height))
+        out.alpha_composite(col, (x, 0)) if d <= 0 else out.paste(col, (x, -round(phase * amp * d / reach)), col)
     return out
 
 
@@ -411,7 +431,8 @@ def generate_directions(client, design, seed, progress=lambda m: None, cancel=la
                         brief=None, description=""):
     """{direction: [versions, la meilleure d'abord]} ; droite = miroir de gauche (même créature, garanti)."""
     out = {"bas": [design]}
-    out["haut"] = _best(client, view_prompt("haut", False, brief, description), [design], "haut", seed + 7, tries, cancel, progress, "Vue de dos")
+    out["haut"] = _best(client, view_prompt("haut", False, brief, description), [ImageOps.mirror(design)], "haut", seed + 7,
+                        tries, cancel, progress, "Vue de dos")
     # à pattes : le design seul (le dos en référence laisse sa raie sur le flanc et tasse le corps) ;
     # sans pattes (œil, pieuvre) : face + dos, sinon le modèle invente un corps à quatre pattes en tournant de 90°
     refs = [design] if legs else [design, out["haut"][0]]
@@ -427,6 +448,8 @@ def generate_view(client, refs, direction, seed, progress=lambda m: None, cancel
     label = {"haut": "Vue de dos", "gauche": "Profil"}[direction]
     if legs:
         refs = refs[:1]
+    if direction == "haut":  # vu de dos, la gauche et la droite s'échangent : le bâton tenu à gauche passe à droite
+        refs = [ImageOps.mirror(refs[0])]
     return _best(client, view_prompt(direction, legs, brief, description), refs, direction, seed, 1, cancel, progress, label)[0]
 
 
@@ -505,9 +528,12 @@ def generate_walk(client, view, direction, description, seed, progress=lambda m:
 
     Les pas sont calculés depuis la pose de repos (pas redessinés par le modèle) : les pattes restent nettes et la
     créature identique d'une image à l'autre. Sans pattes (œil, blob, serpent) : rebond."""
+    flies = (brief or {}).get("posture") in FLOATING
+    if has_wings(description, brief) and (flies or not has_legs(description, brief)):
+        return [flap(view, direction, 1), view.copy(), flap(view, direction, -1)]
     if not has_legs(description, brief):
-        move = hover if (brief or {}).get("posture") in FLOATING else bob
-        return [move(view, 1), view.copy(), move(view, -1)]
+        # le décalage de hover() disparaît quand les sprites sont alignés en bas : il faut une forme qui change
+        return [bob(view, 1), view.copy(), bob(view, -1)]
     return [step_frame(view, direction, 1), view.copy(), step_frame(view, direction, -1)]
 
 
