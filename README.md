@@ -43,7 +43,7 @@ Les créatures sont rangées dans `Documents\NeoBestiary Studio`, les exports da
   - **BiRefNet** (détourage : ni fond ni ombre au sol).
 - Pour l'inspiration et les fiches : **Ollama** ([ollama.com](https://ollama.com)) avec un modèle de texte, par exemple `ollama pull mistral-nemo` (environ 7 Go, très bon en français). Pour le contrôle automatique, un modèle qui voit les images : `ollama pull gemma3:4b` (environ 3 Go). Sans Ollama, tout le reste fonctionne ; seules l'inspiration, les fiches et le contrôle attendent, et la posture est devinée par mots-clés.
 
-ComfyUI démarre tout seul à la première invocation et s'arrête quand tu fermes NeoBase. Si tu as déjà lancé ton propre ComfyUI, l'appli l'utilise et ne l'arrête pas.
+ComfyUI démarre tout seul à la première invocation et s'arrête quand tu fermes NeoDex. Si tu as déjà lancé ton propre ComfyUI, l'appli l'utilise et ne l'arrête pas.
 
 ## Combien de temps
 

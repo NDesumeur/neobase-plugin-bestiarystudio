@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Fabrique l'archive du plugin (neobase.bestiarystudio-<version>.zip) : manifeste, page, volet système, ui/ et engine/."""
+"""Fabrique l'archive du plugin (neodex.bestiarystudio-<version>.zip) : manifeste, page, volet système, ui/ et engine/."""
 import json
 import zipfile
 from pathlib import Path

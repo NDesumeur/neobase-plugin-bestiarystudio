@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""NeoBestiary Studio - service local (API JSON) pour le plugin NeoBase.
+"""NeoBestiary Studio - service local (API JSON) pour le plugin NeoDex.
 
 python nb_server.py --token T [--port 0] [--library DOSSIER] [--comfy-root DOSSIER] [--comfy-url URL] [--fake]
 Écrit « NB_READY <port> » sur la sortie dès qu'il écoute. Seul 127.0.0.1 est servi et chaque requête doit

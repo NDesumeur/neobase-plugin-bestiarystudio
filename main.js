@@ -1,6 +1,6 @@
-// NeoBestiary Studio, volet système (chargé par NeoBase une fois le plugin signé et l'accès complet accordé).
+// NeoBestiary Studio, volet système (chargé par NeoDex une fois le plugin signé et l'accès complet accordé).
 // Il lance le moteur Python (engine/nb_server.py) avec le Python fourni par ComfyUI portable, lui parle en HTTP local
-// avec un jeton secret, et sert l'interface (ui/) et les images de la bibliothèque sur neoplugin://neobase.bestiarystudio/.
+// avec un jeton secret, et sert l'interface (ui/) et les images de la bibliothèque sur neoplugin://neodex.bestiarystudio/.
 const { app, dialog, shell } = require('electron');
 const { spawn } = require('child_process');
 const fs = require('fs'), path = require('path'), crypto = require('crypto');
@@ -19,7 +19,7 @@ const inside = (base, rel) => { const p = path.resolve(base, rel); return p.star
 
 module.exports = ({ ipcMain, protocol, serveFile, readDoc, writeDoc }) => {
   let srv = null;  // { proc, port, token, ready }
-  const settings = async () => ({ comfyRoot: '', comfyUrl: 'http://127.0.0.1:8188', ...(readDoc('settings') || {}) });  // readDoc de NeoBase est synchrone, null si absent
+  const settings = async () => ({ comfyRoot: '', comfyUrl: 'http://127.0.0.1:8188', ...(readDoc('settings') || {}) });  // readDoc de NeoDex est synchrone, null si absent
 
   async function comfyRoot() {
     const s = await settings();
@@ -83,7 +83,7 @@ module.exports = ({ ipcMain, protocol, serveFile, readDoc, writeDoc }) => {
     return call('POST', '/export', { slug, dest: r.filePaths[0] });
   });
 
-  // neoplugin://neobase.bestiarystudio/ui/<fichier> | lib/<créature>/<chemin>
+  // neoplugin://neodex.bestiarystudio/ui/<fichier> | lib/<créature>/<chemin>
   protocol(async req => {
     const u = new URL(req.url), [, kind, ...rest] = u.pathname.split('/'), rel = decodeURIComponent(rest.join('/'));
     const file = kind === 'ui' ? inside(UI, rel) : kind === 'lib' ? inside(path.join(LIBRARY(), 'creatures'), rel) : null;
@@ -91,7 +91,7 @@ module.exports = ({ ipcMain, protocol, serveFile, readDoc, writeDoc }) => {
     return serveFile(file, req, TYPES[path.extname(file).toLowerCase()]);
   });
 
-  return () => {  // plugin désactivé ou NeoBase fermé : le moteur arrête le ComfyUI qu'il a lancé, puis s'en va
+  return () => {  // plugin désactivé ou NeoDex fermé : le moteur arrête le ComfyUI qu'il a lancé, puis s'en va
     const cur = srv; srv = null;
     if (!cur) return;
     fetch(`http://127.0.0.1:${cur.port}/shutdown`, { method: 'POST', headers: { 'X-NB-Token': cur.token }, body: '{}', signal: AbortSignal.timeout(3000) })

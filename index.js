@@ -1,6 +1,6 @@
 // NeoBestiary Studio : une description en français -> une créature pixel art 64x64, 4 directions, marche en 3 images.
 // La page parle au moteur (main.js -> engine/nb_server.py) ; tout le dessin de l'interface est dans ui/ (sprites faits main).
-const ID = 'neobase.bestiarystudio', U = 'neoplugin://' + ID + '/';
+const ID = 'neodex.bestiarystudio', U = 'neoplugin://' + ID + '/';
 const DIRS = ['bas', 'gauche', 'droite', 'haut'], FR = ['pas1', 'repos', 'pas2'], CYCLE = ['pas1', 'repos', 'pas2', 'repos'];
 const ARROW = { bas: '↓', gauche: '←', droite: '→', haut: '↑' };
 const ic = n => `<i class="ic" style="background-image:url(${U}ui/i_${n}.png)"></i>`;
@@ -240,7 +240,7 @@ const HTML = `<link rel="stylesheet" href="${U}ui/studio.css">
 
 export default async function (ctx) {
   const view = ctx.view;
-  if (!ctx.host) { view.textContent = "Ce plugin doit être approuvé par NeoBase pour s'ouvrir."; return; }
+  if (!ctx.host) { view.textContent = "Ce plugin doit être approuvé par NeoDex pour s'ouvrir."; return; }
   view.innerHTML = HTML;
   const $ = s => view.querySelector(s), $$ = s => [...view.querySelectorAll(s)];
   const call = (n, ...a) => ctx.neo.pluginMain(ID, n, ...a);
