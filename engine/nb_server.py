@@ -24,6 +24,9 @@ from PIL import Image, ImageOps
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import nb_comfy as nbc  # noqa: E402
 import nb_library  # noqa: E402
+import nb_attack  # noqa: E402
+import nb_check  # noqa: E402
+import nb_stats  # noqa: E402
 import nb_sprite as sp  # noqa: E402
 
 DIRS = ("bas", "gauche", "droite", "haut")
@@ -83,6 +86,11 @@ class Jobs:
 
         threading.Thread(target=run, daemon=True).start()
         return jid
+
+    def grow(self, n):
+        """Des étapes de plus (esquisses refaites après contrôle) : la jauge ne dépasse pas la fin."""
+        with self.lock:
+            self.state["total"] = self.state.get("total", 1) + n
 
     def cancel(self):
         self._cancel = True
@@ -166,13 +174,73 @@ class Studio:
         def run(progress, cancel):  # 1re étape : des esquisses du design, l'utilisateur choisit la bonne (/continue)
             progress("Lecture de la description")
             brief = self._brief(slug)
-            c = self.client()
-            for i in range(SKETCHES):
-                design = self.eng.generate_design(c, description, seed + i, progress, cancel, brief=brief)
-                self.lib.add_pil(slug, "bas", design, f"esquisse {i + 1}")
+            for n, (im, note) in enumerate(self._sketches(description, seed, brief, progress, cancel), 1):
+                self.lib.add_pil(slug, "bas", im, f"esquisse {n}{note}")
             self.lib.set_active(slug, "bas", 0)
             return slug
-        return self.jobs.start("sketch", run, SKETCHES + 1, slug), slug
+        return self.jobs.start("sketch", run, SKETCHES + 2, slug), slug
+
+    def _look(self, images):
+        """Ce que le modèle de vision voit sur ces images ([] s'il n'y en a pas : on ne contrôle rien)."""
+        if not images or not self.writer.vision_model():
+            return []
+        self._free_gpu()
+        try:
+            return self.writer.look(images)
+        except Exception as exc:
+            print("contrôle impossible :", exc)
+            return []
+
+    def _sketches(self, description, seed, brief, progress, cancel, rounds=3):
+        """SKETCHES esquisses contrôlées : celles qui ratent (mauvais nombre de têtes, pattes en trop) sont refaites,
+        2 fois au plus ; s'il en manque encore, les moins fausses complètent, avec ce qui ne va pas en note."""
+        good, spare, k = [], [], 0
+        checks = bool(nb_check.expected_heads(brief) or nb_check.legless(brief))
+        for rnd in range(rounds):
+            need = SKETCHES - len(good)
+            if need <= 0:
+                break
+            if rnd:
+                self.jobs.grow(need + 1)
+            c = self.client()
+            batch = []
+            for _ in range(need):
+                batch.append(self.eng.generate_design(c, description, seed + k, progress, cancel, brief=brief))
+                k += 1
+            seen = self._look(batch) if checks else []
+            if not seen:
+                return [(im, "") for im in (([im for _, im, _ in good]) + batch)][:SKETCHES]
+            progress("Vérification des esquisses")
+            for im, s in zip(batch, seen):
+                ok, issues, gap = nb_check.verdict(s, brief)
+                (good if ok else spare).append((gap, im, issues))
+        spare.sort(key=lambda t: t[0])
+        picks = [(im, " ✓") for _, im, _ in good[:SKETCHES]]
+        picks += [(im, " ⚠ " + ", ".join(issues)) for _, im, issues in spare[:SKETCHES - len(picks)]]
+        return picks
+
+    def _check_profile(self, c, dirs, design, back, seed, brief, description, progress, cancel):
+        """Créature sans pattes : un profil qui en a quand même est écarté, et refait (2 essais de plus) s'il le faut."""
+        if not nb_check.legless(brief):
+            return dirs
+        cands = list(dirs["gauche"])
+        seen = self._look(cands)
+        if not seen:
+            return dirs
+        ok = [im for im, s in zip(cands, seen) if nb_check.verdict(s, brief, legs_only=True)[0]]
+        if not ok:
+            self.jobs.grow(3)
+            c = self.client()
+            extra = [self.eng.generate_view(c, [design, back], "gauche", seed + 2000 + i, progress, cancel, legs=False,
+                                            brief=brief, description=description) for i in range(2)]
+            progress("Vérification du profil")
+            seen2 = self._look(extra)
+            ok = [im for im, s in zip(extra, seen2) if nb_check.verdict(s, brief, legs_only=True)[0]]
+            cands += extra
+        order = ok + [im for im in cands if not any(im is o for o in ok)]  # les bons d'abord : le 1er devient actif
+        dirs["gauche"] = order
+        dirs["droite"] = [ImageOps.mirror(im) for im in order]
+        return dirs
 
     def _brief(self, slug):
         """Ce que la plume a compris de la description (posture, pattes, anglais), calculé une fois par créature."""
@@ -196,8 +264,11 @@ class Studio:
         rec = self.lib.load(slug)
         design = self._active(slug, "bas")
         brief = self._brief(slug)
-        dirs = self.eng.generate_directions(c, design, seed, progress, cancel, legs=self.eng.has_legs(rec["description"], brief),
+        legs = self.eng.has_legs(rec["description"], brief)
+        dirs = self.eng.generate_directions(c, design, seed, progress, cancel, legs=legs,
                                             brief=brief, description=rec["description"])
+        if not legs:
+            dirs = self._check_profile(c, dirs, design, dirs["haut"][0], seed, brief, rec["description"], progress, cancel)
         for d in ("haut", "gauche"):  # droite : le miroir de la gauche active, posé par _mirror_walk
             n = len(rec.get("views", {}).get(d, {}).get("files", []))
             for im in dirs[d]:
@@ -238,7 +309,9 @@ class Studio:
             self._free_gpu()
         rec = self.lib.load(slug)
         rec["lore"] = self.writer.lore(rec["name"], rec.get("description", ""), int(time.time()) % 100000)
+        rec["lore"]["combat"] = nb_stats.card(slug, rec["lore"], (rec.get("brief") or {}).get("posture", ""))
         self.lib.save(rec)
+        self.build_attacks(slug)
         return self.creature(slug)
 
     def _rest_steps(self, slug):
@@ -322,6 +395,44 @@ class Studio:
         total = 1 + (self._rest_steps(slug) if d == "bas" else 0)
         return self.jobs.start("redo", run, total, slug)
 
+    def edit(self, slug, key, instruction, zone=None, index=None):
+        """Retouche d'une vue (bas, haut, gauche) : zone = [x, y, rayon] en fractions, ou None pour toute la créature.
+        index : une esquisse précise (avant le choix du design) ; sinon la version active. La retouche devient une
+        nouvelle version : rien n'est perdu."""
+        rec = self.lib.load(slug)
+        if rec is None or key not in ("bas", "haut", "gauche"):
+            raise ValueError("Créature ou vue inconnue.")
+        instruction = (instruction or "").strip()
+        if not instruction:
+            raise ValueError("Écris ce qu'il faut changer.")
+        if self.jobs.get()["running"]:
+            raise RuntimeError("Une tâche est déjà en cours.")
+        if zone is not None:
+            zone = [float(v) for v in zone][:3]
+            if len(zone) != 3 or not all(0 <= v <= 1 for v in zone):
+                raise ValueError("Zone invalide.")
+        files = rec.get("views", {}).get(key, {}).get("files", [])
+        src = self.lib.dir(slug) / files[int(index)] if index is not None and 0 <= int(index) < len(files) \
+            else self.lib.active_path(rec, key)
+        if src is None or not Path(src).is_file():
+            raise ValueError("Pas d'image à retoucher.")
+        pending = not rec.get("views", {}).get("haut")
+
+        def run(progress, cancel):
+            c = self.client()
+            im = self.eng.generate_edit(c, Image.open(src).convert("RGBA"), instruction, int(time.time()) % 1000000,
+                                        zone, progress, cancel)
+            self.lib.add_pil(slug, key, im, "retouche : " + instruction[:40])
+            if pending:  # une esquisse de plus parmi lesquelles choisir
+                return slug
+            self.lib.set_active(slug, key, 10 ** 6)
+            self._walk(c, slug, key, progress, cancel)
+            if key == "gauche":
+                self._mirror_walk(slug)
+            self.build_sprites(slug)
+            return slug
+        return self.jobs.start("edit", run, 1, slug)
+
     def choose(self, slug, key, delta=None, index=None):
         """Change la version active d'une vue (direction ou pas) puis refait les sprites."""
         if delta is not None:
@@ -351,6 +462,8 @@ class Studio:
                     palette=rec.get("sprite_palette", []), updated=rec.get("updated", 0),
                     sheet="sprites/sheet.png" if (sd / "sheet.png").is_file() else None,
                     designs=rec.get("views", {}).get("bas", {}).get("files", []), lore=rec.get("lore"), brief=rec.get("brief"),
+                    design_notes=rec.get("views", {}).get("bas", {}).get("notes", []),
+                    attack_fx=rec.get("attack_fx", {}), timing=list(nb_attack.TIMING),
                     pending=not rec.get("views", {}).get("haut"))  # esquisses pas encore choisies
 
     def library(self):
@@ -419,7 +532,42 @@ class Studio:
         rec["sprite_palette"] = sp.extract_palette(Image.open(sd / "bas_repos.png").convert("RGBA"), int(lab["colors"]))
         self.lib.save(rec)
         self._sheet(slug)
+        self.build_attacks(slug)
         return self.creature(slug)
+
+    def build_attacks(self, slug):
+        """Les 2 attaques de la fiche, animées dans les 4 directions : corps (pixels du sprite) + calque d'effet."""
+        rec = self.lib.load(slug)
+        moves = ((rec.get("lore") or {}).get("combat") or {}).get("attaques") or []
+        sd = self.lib.sprites_dir(slug)
+        if not moves or not (sd / "bas_repos.png").is_file():
+            return
+        legs = self.eng.has_legs(rec.get("description", ""), rec.get("brief"))
+        fx = {}
+        for n, move in enumerate(moves, 1):
+            body_sheet = Image.new("RGBA", (CELL * nb_attack.FRAMES, CELL * len(DIRS)))
+            fx_sheet = Image.new("RGBA", (CELL * nb_attack.FRAMES, CELL * len(DIRS)))
+            fx[str(n)] = {}
+            for row, d in enumerate(DIRS):
+                rest = sd / f"{d}_repos.png"
+                if not rest.is_file():
+                    continue
+                frames = nb_attack.attack(Image.open(rest).convert("RGBA"), d, move["genre"], move["element"], legs)
+                fx[str(n)][d] = []
+                for i, f in enumerate(frames):
+                    f["body"].save(sd / f"attaque{n}_{d}_{i}.png")
+                    body_sheet.paste(f["body"], (i * CELL, row * CELL))
+                    if f["effect"] is not None:
+                        f["effect"].save(sd / f"effet{n}_{d}_{i}.png")
+                        fx_sheet.paste(f["effect"], (i * CELL, row * CELL))
+                    else:
+                        (sd / f"effet{n}_{d}_{i}.png").unlink(missing_ok=True)
+                    fx[str(n)][d].append(dict(offset=list(f["offset"]), effect=f["effect"] is not None))
+            body_sheet.save(sd / f"attaque{n}.png")
+            fx_sheet.save(sd / f"effet{n}.png")
+        rec = self.lib.load(slug)
+        rec["attack_fx"] = fx
+        self.lib.save(rec)
 
     def save_frame(self, slug, key, png_b64):
         """Retouche pixel d'une image (64x64) : gardée dans sprites/edits et appliquée à chaque reconstruction."""
@@ -433,6 +581,7 @@ class Studio:
         im.save(sd / "edits" / f"{key}.png")
         im.save(sd / f"{key}.png")
         self._sheet(slug)
+        self.build_attacks(slug)  # les attaques partent des sprites de repos retouchés
         return self.creature(slug)
 
     def reset_edits(self, slug):
@@ -464,8 +613,21 @@ class Studio:
             directions={d: dict(row=r, frames={f: dict(x=c * CELL, y=r * CELL) for c, f in enumerate(FRAMES)})
                         for r, d in enumerate(DIRS)},
             description=rec.get("description", ""), seed=rec.get("seed"), fiche=rec.get("lore"),
-            portrait="portrait.png",
+            portrait="portrait.png", attaques=[],
         )
+        sd = self.lib.sprites_dir(slug)
+        moves = ((rec.get("lore") or {}).get("combat") or {}).get("attaques") or []
+        for n, move in enumerate(moves, 1):  # 2 planches par attaque : le corps, et l'effet à poser par-dessus
+            fx = rec.get("attack_fx", {}).get(str(n))
+            if not fx or not (sd / f"attaque{n}.png").is_file():
+                continue
+            shutil.copyfile(sd / f"attaque{n}.png", out / f"{base}_attaque{n}.png")
+            shutil.copyfile(sd / f"effet{n}.png", out / f"{base}_effet{n}.png")
+            meta["attaques"].append(dict(
+                move, image=f"{base}_attaque{n}.png", effet_image=f"{base}_effet{n}.png", timing_ms=list(nb_attack.TIMING),
+                directions={d: dict(row=r, frames=[dict(x=i * CELL, y=r * CELL, effet=f["effect"],
+                                                        effet_decalage=f["offset"]) for i, f in enumerate(fx[d])])
+                            for r, d in enumerate(DIRS) if d in fx}))
         design = self._active(slug, "bas")
         if design is not None:  # le design en grand (pour une carte de bestiaire)
             box = design.getbbox()
@@ -525,6 +687,7 @@ def make_handler(studio, token):
         "/cancel": lambda b: studio.jobs.cancel() or dict(ok=True),
         "/redo": lambda b: dict(job=studio.redo(b["slug"], b["dir"])),
         "/continue": lambda b: dict(job=studio.finish(b["slug"], b["index"])),
+        "/edit": lambda b: dict(job=studio.edit(b["slug"], b["key"], b.get("instruction"), b.get("zone"), b.get("index"))),
         "/inspire": lambda b: studio.inspire(b.get("theme"), b.get("seed")),
         "/lore": lambda b: studio.write_lore(b["slug"]),
         "/choose": lambda b: studio.choose(b["slug"], b["key"], b.get("delta"), b.get("index")),

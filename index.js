@@ -85,6 +85,9 @@ const HTML = `<link rel="stylesheet" href="${U}ui/studio.css">
         <span class="nbs-hint" id="dirHint">Clique une image puis ◀ ▶ pour changer sa version.</span>
       </div>
       <div class="nbs-sep"></div>
+      <div class="nbs-title">Attaques</div>
+      <div id="attacks"></div>
+      <div class="nbs-sep"></div>
       <div class="nbs-title">Fiche du bestiaire</div>
       <div class="nbs-parch nbs-fiche" id="fiche"></div>
       <div class="nbs-row" style="margin-top:8px">
@@ -123,8 +126,8 @@ const HTML = `<link rel="stylesheet" href="${U}ui/studio.css">
         </div>
         <div class="grow">
           <div class="nbs-title">Aperçu en jeu</div>
-          <div class="nbs-world" id="world"><div class="road"></div><img class="hero" id="hero" alt=""></div>
-          <div class="nbs-keys" style="margin-top:8px">Flèches du clavier : fais marcher ta créature</div>
+          <div class="nbs-world" id="world"><div class="road"></div><img class="hero" id="hero" alt=""><img class="fx" id="heroFx" alt=""></div>
+          <div class="nbs-keys" style="margin-top:8px">Flèches : marcher · 1 et 2 : attaquer</div>
           <div class="nbs-sep"></div>
           <div class="nbs-title">Réglages</div>
           <div class="nbs-opt" data-o="outline"><span class="nbs-check"></span>Contour sombre</div>
@@ -149,6 +152,30 @@ const HTML = `<link rel="stylesheet" href="${U}ui/studio.css">
       <div class="nbs-lib" id="lib"></div>
     </section>
   </main>
+  <div class="nbs-modal" id="retouch" hidden>
+    <div class="nbs-frame nbs-modal-box">
+      <div class="nbs-title" id="rtTitle">Retouche</div>
+      <div class="nbs-rt-cols">
+        <div class="nbs-rt-pic nbs-well" id="rtPic"><img id="rtImg" alt=""><i id="rtZone"></i></div>
+        <div class="nbs-rt-side">
+          <div class="nbs-hint">Clique sur l'image là où il faut changer quelque chose, ou choisis « Toute la créature ».</div>
+          <div class="nbs-row nbs-themes" id="rtSize" style="margin-top:8px">
+            <button class="nbs-btn dark sm" data-r=".06">Petite zone</button>
+            <button class="nbs-btn dark sm on" data-r=".1">Moyenne</button>
+            <button class="nbs-btn dark sm" data-r=".16">Grande</button>
+            <button class="nbs-btn dark sm" data-r="0">Toute la créature</button>
+          </div>
+          <div class="nbs-title" style="margin-top:12px">Que faut-il changer ?</div>
+          <div class="nbs-parch"><input type="text" id="rtText" maxlength="160" placeholder="ajoute une corne ici, les yeux en rouge…" spellcheck="false"></div>
+          <div class="nbs-row" style="margin-top:12px">
+            <button class="nbs-btn go" id="rtGo">${ic('crayon')}Retoucher</button>
+            <button class="nbs-btn dark" id="rtClose">Annuler</button>
+          </div>
+          <div class="nbs-hint" id="rtMsg" style="margin-top:8px">La retouche devient une nouvelle version : l'ancienne reste avec ◀ ▶.</div>
+        </div>
+      </div>
+    </div>
+  </div>
 </div>`;
 
 export default async function (ctx) {
@@ -233,7 +260,7 @@ export default async function (ctx) {
     });
     busy(false);
     if (j.error) { say(j.error, true); return null; }
-    say(j.kind === 'sketch' ? 'Choisis ton design ↓' : 'Créature invoquée ✓');
+    say(j.kind === 'sketch' ? 'Choisis ton design ↓' : j.kind === 'edit' ? 'Retouche faite ✓ (nouvelle version)' : 'Créature invoquée ✓');
     get('/status').then(status).catch(() => {});
     if (j.slug) await open(j.slug);
     return j;
@@ -280,9 +307,77 @@ export default async function (ctx) {
       <dl class="nbs-fiche-stats"><dt>Espèce</dt><dd>${esc(f.espece)}</dd><dt>Taille</dt><dd>${esc(f.taille)}</dd>
       <dt>Poids</dt><dd>${esc(f.poids)}</dd><dt>Habitat</dt><dd>${esc(f.habitat)}</dd></dl></div></div>
       <p class="nbs-read">${esc(f.description)}</p>
-      <div class="nbs-story"><div class="nbs-story-t">Légende</div><p class="nbs-read">${esc(f.histoire)}</p></div>`
+      <div class="nbs-story"><div class="nbs-story-t">Légende</div><p class="nbs-read">${esc(f.histoire)}</p></div>${combat(f.combat)}`
       : '<div class="nbs-hint">Pas encore de fiche : clique « Réécrire la fiche ».</div>';
   }
+  const STAT = { pv: 'PV', attaque: 'Attaque', defense: 'Défense', vitesse: 'Vitesse' };
+  const GENRE = { griffe: 'griffes', morsure: 'morsure', charge: 'charge', projectile: 'projectile', souffle: 'souffle', onde: 'onde', rayon: 'rayon' };
+  function combat(k) {
+    if (!k) return '';
+    const chips = (l, cls) => l.map(t => `<span class="nbs-chip ${cls}">${esc(t)}</span>`).join(' ') || '—';
+    return `<div class="nbs-combat"><div class="nbs-combat-head"><span class="nbs-rare r${['commun', 'peu commun', 'rare', 'épique', 'légendaire'].indexOf(k.rarete)}">${esc(k.rarete)}</span></div>
+      <div class="nbs-statgrid">${Object.entries(STAT).map(([key, label]) => `<span>${label}</span><i><b style="width:${Math.min(100, k.stats[key])}%"></b></i><em>${k.stats[key]}</em>`).join('')}</div>
+      <div class="nbs-read nbs-weak"><b>Faible contre</b> ${chips(k.faiblesses, 'bad')} &nbsp; <b>Résiste à</b> ${chips(k.resistances, 'good')}</div>
+      ${k.attaques.map((a, i) => `<div class="nbs-move"><div class="nbs-move-t">${i + 1}. ${esc(a.nom)} <span class="nbs-chip">${esc(a.element)}</span> <span class="nbs-chip">${GENRE[a.genre] || esc(a.genre)}</span> <span class="nbs-pow">puissance ${a.puissance}</span></div><p class="nbs-read">${esc(a.description)}</p></div>`).join('')}</div>`;
+  }
+  // ------------------------------------------------------------ attaques animées (corps + calque d'effet)
+  const imgCache = {};
+  const pic = url => { if (!imgCache[url]) { const im = new Image(); im.src = url; imgCache[url] = im; } return imgCache[url]; };
+  const atkMoves = () => S.cr?.lore?.combat?.attaques || [];
+  function atkFrame(n, d, i) {
+    const fx = S.cr?.attack_fx?.[n]?.[d]?.[i];
+    if (!fx) return null;
+    return { body: src(`sprites/attaque${n}_${d}_${i}.png`), fx: fx.effect ? src(`sprites/effet${n}_${d}_${i}.png`) : null, off: fx.offset };
+  }
+  function renderAttacks() {
+    const box = $('#attacks'), moves = atkMoves();
+    if (!S.cr || !moves.length || !S.cr.attack_fx?.['1']) { box.innerHTML = '<div class="nbs-hint">Les attaques arrivent avec la fiche du bestiaire.</div>'; return; }
+    box.innerHTML = moves.map((a, k) => `<div class="nbs-atk"><div class="nbs-atk-t">${k + 1}. ${esc(a.nom)} <span class="nbs-hint">· ${esc(a.element)} · ${GENRE[a.genre] || esc(a.genre)}</span></div>
+      <div class="nbs-atk-row">${DIRS.map(d => `<canvas width="192" height="192" class="nbs-atk-cv nbs-well" data-n="${k + 1}" data-d="${d}"></canvas>`).join('')}</div></div>`).join('');
+  }
+  function drawAttack(cv, n, d, i) {
+    const f = atkFrame(n, d, i), g = cv.getContext('2d');
+    g.imageSmoothingEnabled = false; g.clearRect(0, 0, 192, 192);
+    if (!f) return;
+    const b = pic(f.body); if (b.complete) g.drawImage(b, 64, 64);
+    if (f.fx) { const e = pic(f.fx); if (e.complete) g.drawImage(e, 64 + f.off[0], 64 + f.off[1]); }
+  }
+  // ------------------------------------------------------------ retouche ciblée
+  const RT = { key: 'bas', index: null, x: null, y: null, r: .1 };
+  const NAMES = { bas: 'la face', haut: 'le dos', gauche: 'le profil' };
+  function openRetouch(key, index, url) {
+    if (!url) return;
+    Object.assign(RT, { key, index, x: null, y: null });
+    $('#rtTitle').textContent = index === null ? `Retoucher ${NAMES[key]}` : `Retoucher l'esquisse ${index + 1}`;
+    $('#rtImg').src = url; $('#rtText').value = ''; $('#rtMsg').textContent = "La retouche devient une nouvelle version : l'ancienne reste avec ◀ ▶.";
+    drawZone(); $('#retouch').hidden = false; $('#rtText').focus();
+  }
+  function drawZone() {
+    const z = $('#rtZone');
+    z.hidden = !RT.r || RT.x === null;
+    if (z.hidden) return;
+    Object.assign(z.style, { left: RT.x * 100 + '%', top: RT.y * 100 + '%', width: RT.r * 200 + '%', height: RT.r * 200 + '%' });
+  }
+  $('#rtPic').onclick = e => {
+    const b = $('#rtImg').getBoundingClientRect();
+    RT.x = Math.max(0, Math.min(1, (e.clientX - b.left) / b.width)); RT.y = Math.max(0, Math.min(1, (e.clientY - b.top) / b.height));
+    if (!RT.r) { RT.r = .1; $$('#rtSize .nbs-btn').forEach(x => x.classList.toggle('on', x.dataset.r === '.1')); }
+    drawZone();
+  };
+  $$('#rtSize .nbs-btn').forEach(b => b.onclick = () => {
+    RT.r = +b.dataset.r; $$('#rtSize .nbs-btn').forEach(x => x.classList.toggle('on', x === b)); drawZone();
+  });
+  $('#rtClose').onclick = () => { $('#retouch').hidden = true; };
+  $('#rtGo').onclick = () => {
+    const instruction = $('#rtText').value.trim();
+    if (!instruction) { $('#rtMsg').textContent = 'Écris ce qu\'il faut changer.'; return; }
+    if (RT.r && RT.x === null) { $('#rtMsg').textContent = 'Clique sur l\'image pour placer la zone (ou choisis « Toute la créature »).'; return; }
+    $('#retouch').hidden = true;
+    show('creer');
+    runJob(() => post('/edit', { slug: S.cr.slug, key: RT.key, instruction, index: RT.index, zone: RT.r ? [RT.x, RT.y, RT.r] : null }));
+  };
+  $('#rtText').onkeydown = e => { if (e.key === 'Enter') $('#rtGo').click(); };
+
   $('#relore').onclick = async () => {
     if (!S.cr) return;
     const b = $('#relore'); b.disabled = true; $('#loreMsg').textContent = 'La plume écrit…';
@@ -297,7 +392,7 @@ export default async function (ctx) {
     S.stamp = Date.now();
     $('#liveTitle').textContent = S.cr.name;
     $('#dirTitle').textContent = S.cr.name + ' · 4 directions × 3 pas · 64×64';
-    renderSheet(); renderLab(); renderSketches(); renderFiche();
+    renderSheet(); renderLab(); renderSketches(); renderFiche(); renderAttacks();
     if (S.tab === 'lab') loadFrame();
   }
   function renderSketches() {  // esquisses pas encore choisies : on les montre, un clic lance le reste
@@ -307,14 +402,18 @@ export default async function (ctx) {
     const b = S.cr.brief, P = { quatre_pattes: 'à quatre pattes', deux_jambes: 'debout sur deux jambes', plusieurs_pattes: `sur ${b?.pattes} pattes`,
       flotte: 'flotte dans les airs, sans pattes', vole: 'vole', rampe: 'rampe, sans pattes', nage: 'nage, sans pattes' };
     $('#understood').textContent = b?.posture ? `Compris : ${P[b.posture] || b.posture}. Le dos et le profil suivront cette posture.` : '';
-    $('#sketchRow').innerHTML = S.cr.designs.map((f, i) => `<button class="nbs-sketch" data-i="${i}" title="Continuer avec celle-ci">
-      <img src="${src(f)}" alt=""><span class="nbs-btn go">${ic('ok')}Celle-ci</span></button>`).join('');
-    $$('#sketchRow .nbs-sketch').forEach(b => b.onclick = () => {
+    // note du contrôle automatique : « esquisse 2 ✓ » ou « esquisse 3 ⚠ 1 tête au lieu de 3 »
+    const checkNote = n => { const m = /([✓⚠].*)$/.exec(n || ''); return m ? `<span class="nbs-verdict ${m[1][0] === '✓' ? 'ok' : 'ko'}">${m[1] === '✓' ? '✓ vérifiée' : esc(m[1])}</span>` : ''; };
+    $('#sketchRow').innerHTML = S.cr.designs.map((f, i) => `<div class="nbs-sketch" data-i="${i}">
+      <img src="${src(f)}" alt="">${checkNote(S.cr.design_notes?.[i])}<button class="nbs-btn go" data-go="${i}">${ic('ok')}Celle-ci</button>
+      <button class="nbs-btn dark sm" data-rt="${i}">Retoucher</button></div>`).join('');
+    $$('#sketchRow [data-go]').forEach(b => b.onclick = () => {
       box.hidden = true;
-      runJob(() => post('/continue', { slug: S.cr.slug, index: +b.dataset.i }));
+      runJob(() => post('/continue', { slug: S.cr.slug, index: +b.dataset.go }));
     });
+    $$('#sketchRow [data-rt]').forEach(b => b.onclick = () => openRetouch('bas', +b.dataset.rt, src(S.cr.designs[+b.dataset.rt])));
   }
-  const refresh = cr => { S.cr = cr; S.stamp = Date.now(); renderSheet(); renderLab(); renderFiche(); if (S.tab === 'lab') loadFrame(); };
+  const refresh = cr => { S.cr = cr; S.stamp = Date.now(); renderSheet(); renderLab(); renderFiche(); renderAttacks(); if (S.tab === 'lab') loadFrame(); };
 
   // ------------------------------------------------------------ directions
   function renderSheet() {
@@ -324,11 +423,16 @@ export default async function (ctx) {
       FR.map(f => `<div class="cell${S.sel === d + '_' + f ? ' sel' : ''}" data-k="${d}_${f}"><img src="${sprite(d, f)}" alt=""></div>`).join('') +
       `<div class="nbs-row"><div class="nbs-ver"><button class="nbs-btn dark sq" data-v="-1" data-d="${d}">${ic('prev')}</button>` +
       `<span>${verTxt(d)}</span><button class="nbs-btn dark sq" data-v="1" data-d="${d}">${ic('next')}</button></div>` +
-      `<button class="nbs-btn dark nbs-redo" data-redo="${d}">${ic('refaire')}Refaire</button></div>`).join('');
+      `<button class="nbs-btn dark nbs-redo" data-redo="${d}">${ic('refaire')}Refaire</button>` +
+      (d === 'droite' ? '' : `<button class="nbs-btn dark nbs-redo" data-rt="${d}">${ic('crayon')}Retoucher</button>`) + `</div>`).join('');
     box.querySelectorAll('.cell').forEach(c => c.onclick = () => { S.sel = c.dataset.k; renderSheet(); });
     box.querySelectorAll('[data-v]').forEach(b => b.onclick = async () => {
       const d = b.dataset.d, f = S.sel.startsWith(d + '_') ? S.sel.slice(d.length + 1) : 'repos';
       try { refresh(await post('/choose', { slug: S.cr.slug, key: viewKey(d, f), delta: +b.dataset.v })); } catch (e) { $('#dirHint').textContent = e.message; }
+    });
+    box.querySelectorAll('[data-rt]').forEach(b => b.onclick = () => {
+      const k = b.dataset.rt, v = S.cr.views[k];
+      openRetouch(k, null, v?.file ? src(v.file) : '');
     });
     box.querySelectorAll('[data-redo]').forEach(b => b.onclick = () => {
       $('#dirHint').textContent = 'Nouvelle version en cours… (suivi dans Créer)';
@@ -349,7 +453,21 @@ export default async function (ctx) {
     if (!view.isConnected) { clearInterval(anim); S.alive = false; return; }
     tick++;
     if (S.cr) $$('img.w').forEach(i => { const s = sprite(i.dataset.d, CYCLE[tick % 4]); if (i.getAttribute('src') !== s) i.src = s; i.style.visibility = s ? '' : 'hidden'; });
+    if (S.cr && S.tab === 'dirs') $$('.nbs-atk-cv').forEach(cv => drawAttack(cv, cv.dataset.n, cv.dataset.d, Math.min(3, tick % 7)));
     if (S.tab !== 'lab' || !S.cr) return;
+    const fxImg = $('#heroFx');
+    if (hero.atk) {  // une attaque en cours : ses 4 images, puis retour à la marche
+      const f = atkFrame(hero.atk, hero.d, hero.atkI++);
+      if (f) {
+        const h = $('#hero');
+        h.src = f.body; h.style.left = hero.x + 'px'; h.style.top = hero.y + 'px';
+        fxImg.hidden = !f.fx;
+        if (f.fx) { fxImg.src = f.fx; fxImg.style.left = hero.x + f.off[0] * 2 + 'px'; fxImg.style.top = hero.y + f.off[1] * 2 + 'px'; }
+        return;
+      }
+      hero.atk = 0;
+    }
+    fxImg.hidden = true;
     const k = [...hero.keys].pop(), world = $('#world');
     if (k) {
       const [d, dx, dy] = KEYS[k];
@@ -365,6 +483,7 @@ export default async function (ctx) {
     if (!view.isConnected) { removeEventListener('keydown', onKey, true); removeEventListener('keyup', onUp, true); return; }
     if (S.tab !== 'lab' || /INPUT|TEXTAREA/.test(document.activeElement?.tagName)) return;
     if (KEYS[e.key]) { hero.keys.add(e.key); e.preventDefault(); }
+    if ((e.key === '1' || e.key === '2') && !hero.atk && S.cr?.attack_fx?.[e.key]) { hero.atk = +e.key; hero.atkI = 0; e.preventDefault(); }
     if (e.ctrlKey && e.key.toLowerCase() === 'z') { undo(); e.preventDefault(); }
     if (e.ctrlKey && e.key.toLowerCase() === 'y') { redo(); e.preventDefault(); }
   };

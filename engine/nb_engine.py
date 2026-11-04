@@ -166,9 +166,12 @@ def _loaders(g, model):
     return ["1", 0], ["2", 0], ["3", 0]
 
 
-def build_graph(model, prompt, seed, *, refs=(), size=SIZE, steps=None, cut=False, prefix="neobestiary/engine"):
+def build_graph(model, prompt, seed, *, refs=(), size=SIZE, steps=None, cut=False, prefix="neobestiary/engine",
+                init=None, mask=None):
     """Graphe texte -> image. refs : noms d'images déjà envoyées à ComfyUI (édition par référence, klein seulement).
-    cut : détoure la créature avec BiRefNet et sauve un PNG transparent."""
+    cut : détoure la créature avec BiRefNet et sauve un PNG transparent.
+    init + mask (klein) : retouche ciblée, seule la zone du masque est redessinée (le masque est l'alpha inversé
+    de l'image envoyée : transparent = à redessiner), puis l'original est recollé autour au pixel près."""
     cfg = MODELS[model]
     steps = steps or cfg["steps"]
     g = {}
@@ -190,9 +193,16 @@ def build_graph(model, prompt, seed, *, refs=(), size=SIZE, steps=None, cut=Fals
         g["8"] = {"class_type": "KSamplerSelect", "inputs": {"sampler_name": "euler"}}
         g["9"] = {"class_type": "RandomNoise", "inputs": {"noise_seed": int(seed)}}
         g["10"] = {"class_type": "CFGGuider", "inputs": {"model": unet, "positive": pos, "negative": neg, "cfg": 1.0}}
+        latent = ["6", 0]
+        if init and mask:
+            g["30"] = {"class_type": "LoadImage", "inputs": {"image": init}}
+            g["31"] = {"class_type": "VAEEncode", "inputs": {"pixels": ["30", 0], "vae": vae}}
+            g["32"] = {"class_type": "LoadImage", "inputs": {"image": mask}}
+            g["33"] = {"class_type": "SetLatentNoiseMask", "inputs": {"samples": ["31", 0], "mask": ["32", 1]}}
+            latent = ["33", 0]
         g["11"] = {"class_type": "SamplerCustomAdvanced",
                    "inputs": {"noise": ["9", 0], "guider": ["10", 0], "sampler": ["8", 0], "sigmas": ["7", 0],
-                              "latent_image": ["6", 0]}}
+                              "latent_image": latent}}
         samples = ["11", 0]
     else:
         if refs:
@@ -206,6 +216,11 @@ def build_graph(model, prompt, seed, *, refs=(), size=SIZE, steps=None, cut=Fals
         samples = ["11", 0]
     g["12"] = {"class_type": "VAEDecode", "inputs": {"samples": samples, "vae": vae}}
     image = ["12", 0]
+    if init and mask and model == "klein":  # hors de la zone : les pixels d'origine, exactement
+        g["34"] = {"class_type": "ImageCompositeMasked",
+                   "inputs": {"destination": ["30", 0], "source": image, "x": 0, "y": 0, "resize_source": False,
+                              "mask": ["32", 1]}}
+        image = ["34", 0]
     if cut:
         g["14"] = {"class_type": "LoadBackgroundRemovalModel", "inputs": {"bg_removal_name": CUT_MODEL}}
         g["15"] = {"class_type": "RemoveBackground", "inputs": {"bg_removal_model": ["14", 0], "image": image}}
@@ -240,6 +255,39 @@ def render(client, model, prompt, seed, refs_img=(), cancel=lambda: False, **kw)
     refs = [client.upload_png(_flat(im), f"eref_{uuid.uuid4().hex[:8]}.png") for im in refs_img]
     g = build_graph(model, prompt, seed, refs=refs, **kw)
     return nbc.run_workflow(client, g, cancel, mode="RGBA" if kw.get("cut") else "RGB")
+
+
+def edit_prompt(instruction, zone):
+    where = "Edit only the marked area of this creature" if zone else "Edit this creature"
+    return (f"{where}: {instruction.strip()}. Keep everything else exactly identical: same design, colors, "
+            "proportions, pose, camera and pixel art style. Plain flat light gray background, no cast shadow.")
+
+
+def zone_mask(size, x, y, radius):
+    """Masque de retouche : un disque adouci autour du point cliqué (x, y, radius en fraction de l'image).
+    Envoyé comme alpha inversé : LoadImage de ComfyUI donne masque = 1 - alpha."""
+    from PIL import ImageDraw, ImageFilter
+    w, h = size
+    m = Image.new("L", size, 0)
+    r = max(4, radius * w)
+    ImageDraw.Draw(m).ellipse((x * w - r, y * h - r, x * w + r, y * h + r), fill=255)
+    m = m.filter(ImageFilter.GaussianBlur(r * .15))
+    out = Image.new("RGBA", size, (0, 0, 0, 255))
+    out.putalpha(m.point(lambda v: 255 - v))
+    return out
+
+
+def generate_edit(client, image, instruction, seed, zone=None, progress=lambda m: None, cancel=lambda: False):
+    """Retouche : zone = (x, y, rayon) en fractions -> seule cette zone est redessinée ; None -> toute la créature,
+    éditée d'après elle-même (« les yeux en rouge »)."""
+    progress("Retouche")
+    flat = _flat(image.convert("RGBA")).resize((SIZE, SIZE), Image.Resampling.LANCZOS)
+    ref = client.upload_png(flat, f"edit_{uuid.uuid4().hex[:8]}.png")
+    kw = {}
+    if zone:
+        kw = dict(init=ref, mask=client.upload_png(zone_mask(flat.size, *zone), f"mask_{uuid.uuid4().hex[:8]}.png"))
+    g = build_graph(MODEL, edit_prompt(instruction, bool(zone)), seed, refs=[ref], cut=True, **kw)
+    return nbc.run_workflow(client, g, cancel, mode="RGBA")
 
 
 # --------------------------------------------------------------------------- créature complète

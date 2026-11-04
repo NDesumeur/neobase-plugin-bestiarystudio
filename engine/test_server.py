@@ -106,6 +106,17 @@ def main():
         assert c["lore"] and c["lore"]["histoire"], "fiche absente après la création"
         _, c = call(port, "/lore", {"slug": slug})
         assert c["lore"]["type"], c["lore"]
+        k = c["lore"]["combat"]
+        assert k["rarete"] and sum(k["stats"].values()) > 100 and len(k["attaques"]) == 2 and k["faiblesses"], k
+        assert set(c["attack_fx"]["2"]) == {"bas", "haut", "gauche", "droite"}, c["attack_fx"]
+        n = c["views"]["gauche"]["versions"]
+        assert call(port, "/edit", {"slug": slug, "key": "gauche", "instruction": ""})[0] == 400, "retouche vide acceptée"
+        assert call(port, "/edit", {"slug": slug, "key": "gauche", "instruction": "une corne", "zone": [.5, .3, .1]})[0] == 200
+        wait_job(port)
+        _, c = call(port, "/creature?slug=" + slug)
+        v = c["views"]["gauche"]
+        assert v["versions"] == n + 1 and v["version"] == v["versions"], v  # la retouche devient la vue active
+        assert c["views"]["droite"]["file"] and c["attack_fx"]["1"]["droite"], "le miroir et les attaques suivent"
         _, i = call(port, "/inspire", {"theme": "lovecraft"})
         assert i["description"], i
 
@@ -113,12 +124,25 @@ def main():
         meta = json.loads(Path(e["json"]).read_text(encoding="utf-8"))
         assert meta["rows"] == 4 and meta["directions"]["haut"]["row"] == 3 and Path(e["png"]).is_file()
         assert meta["fiche"]["histoire"] and (Path(e["folder"]) / "portrait.png").is_file()
+        atk = meta["attaques"][1]
+        assert atk["genre"] == "projectile" and (Path(e["folder"]) / atk["effet_image"]).is_file(), atk
+        assert len(atk["directions"]["gauche"]["frames"]) == 4 and "effet_decalage" in atk["directions"]["bas"]["frames"][2]
         assert Path(e["folder"]).parent == Path(call(port, "/exports")[1]["folder"]), e["folder"]
 
         _, libr = call(port, "/library")
         assert [x["slug"] for x in libr] == [slug] and libr[0]["thumb"]
         call(port, "/delete", {"slug": slug})
         assert call(port, "/library")[1] == [] and (Path(lib) / "corbeille").is_dir()
+        if not real:  # contrôle automatique : l'esquisse à 1 tête est refaite, le profil avec pattes est refait
+            _, r = call(port, "/create", {"name": "Trio", "description": "méduse à trois têtes qui flotte", "seed": 5})
+            wait_job(port)
+            _, c = call(port, "/creature?slug=" + r["slug"])
+            assert len(c["designs"]) == 3 and all("✓" in n for n in c["design_notes"]), c["design_notes"]
+            call(port, "/continue", {"slug": r["slug"], "index": 0})
+            wait_job(port)
+            _, c = call(port, "/creature?slug=" + r["slug"])
+            assert c["views"]["gauche"]["versions"] == 4, c["views"]["gauche"]  # 2 refusés + 2 refaits
+            call(port, "/delete", {"slug": r["slug"]})
         print("OK : toutes les routes répondent", "(moteur réel)" if real else "(moteur factice)")
     finally:
         proc.kill()

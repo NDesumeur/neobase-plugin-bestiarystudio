@@ -8,6 +8,7 @@ import random
 import urllib.request
 
 import nb_archetypes
+import nb_stats
 
 OLLAMA = "http://127.0.0.1:11434"
 PREFERRED = ("mistral-nemo", "mistral-small", "mistral", "qwen3:8b", "qwen2.5", "llama3.1", "gemma3", "gemma2")
@@ -80,7 +81,7 @@ def _ask(system, prompt, seed, temperature=0.8, keep_alive=None):
     if not m:
         raise WriterError("Pour écrire, installe Ollama (ollama.com) puis un modèle : « ollama pull mistral-nemo ».")
     body = {"model": m, "system": system, "prompt": prompt, "format": "json", "stream": False, "think": False,
-            "options": {"temperature": temperature, "seed": int(seed), "num_predict": 600}}
+            "options": {"temperature": temperature, "seed": int(seed), "num_predict": 1000}}
     if keep_alive is not None:  # 0 : le modèle de texte rend la carte tout de suite au dessin
         body["keep_alive"] = keep_alive
     req = urllib.request.Request(OLLAMA + "/api/generate", data=json.dumps(body).encode(), headers={"Content-Type": "application/json"})
@@ -188,6 +189,55 @@ def brief(description, seed=1):
                 anatomie=_anatomy(out.get("anatomie")), profil=_clean(out.get("profil"), 300))
 
 
+VISION = ("qwen2.5vl", "qwen3-vl", "gemma3", "llama3.2-vision", "minicpm-v", "llava")
+LOOK = ("Look at this creature. Count carefully, one by one: how many heads, how many eyes in total, how many "
+        "tentacles, and how many legs (jointed limbs with feet or paws that it could walk on; tentacles, fins, tails "
+        "and dangling strands are NOT legs)? Answer in JSON with integer keys: heads, eyes, tentacles, legs.")
+
+
+def vision_model():
+    """Un modèle d'Ollama qui voit les images (gemma3, qwen2.5vl…), ou None."""
+    try:
+        names = [m["name"] for m in _get("/api/tags").get("models", [])]
+    except Exception:
+        return None
+    for want in VISION:
+        for n in names:
+            if n.split(":")[0] == want:
+                return n
+    return None
+
+
+def look(images, keep_alive=0):
+    """Ce que le modèle de vision compte sur chaque image : [{"heads", "eyes", "legs"}] (vide si pas de modèle)."""
+    import base64
+    import io
+    from PIL import Image
+    m = vision_model()
+    if not m:
+        return []
+    out = []
+    for k, im in enumerate(images):
+        im = im.convert("RGBA")
+        box = im.getbbox() or (0, 0, *im.size)
+        bg = Image.new("RGB", im.size, (200, 200, 200))
+        bg.paste(im, mask=im.getchannel("A"))
+        bg = bg.crop(box).resize((448, 448))
+        buf = io.BytesIO()
+        bg.save(buf, "PNG")
+        body = {"model": m, "prompt": LOOK, "images": [base64.b64encode(buf.getvalue()).decode()], "format": "json",
+                "stream": False, "think": False, "options": {"temperature": 0, "num_predict": 80},
+                "keep_alive": keep_alive if k == len(images) - 1 else "2m"}
+        req = urllib.request.Request(OLLAMA + "/api/generate", data=json.dumps(body).encode(),
+                                     headers={"Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=300) as r:
+                out.append(json.loads(json.loads(r.read())["response"]))
+        except Exception as exc:
+            raise WriterError(f"Le modèle de vision n'a pas répondu ({exc}).")
+    return out
+
+
 def lore(name, description, seed=1):
     """Fiche façon Pokédex : type, espèce, taille, poids, habitat, description, histoire."""
     prompt = (f"Créature : « {name} » — {description}\n\nRédige sa fiche en JSON avec exactement ces clés :\n"
@@ -196,11 +246,20 @@ def lore(name, description, seed=1):
               "\"taille\" (en mètres, ex. « 1,2 m »),\n\"poids\" (ex. « 85 kg »),\n\"habitat\" (une phrase),\n"
               "\"description\" (2 phrases, comme un naturaliste qui l'a observée : son allure ET son comportement "
               "(ce qu'elle mange, comment elle chasse ou se cache), avec tes propres mots ; ne recopie pas la description),\n"
-              "\"histoire\" (2 ou 3 phrases : une légende, une croyance ou une anecdote, façon Pokédex).")
+              "\"histoire\" (2 ou 3 phrases : une légende, une croyance ou une anecdote, façon Pokédex),\n"
+              "\"menace\" (entier de 1 à 5 : 1 = inoffensive, 3 = dangereuse, 5 = fléau d'une région ; sois juste, "
+              "la plupart des créatures valent 2 ou 3),\n"
+              f"\"attaques\" (exactement 2 attaques qu'elle utilise vraiment, d'après son corps : la 1re rapide, la 2e "
+              f"sa plus forte. Chacune : {{\"nom\": nom court en français, \"genre\": un mot parmi {', '.join(nb_stats.GENRES)}, "
+              f"\"element\": un mot parmi {', '.join(TYPES)}, \"description\": une phrase}}).")
     out = _ask(SYS_LORE, prompt, seed)
     fiche = {k: _clean(out.get(k)) for k in ("type", "espece", "taille", "poids", "habitat", "description", "histoire")}
     t = fiche["type"].lower()
     fiche["type"] = t if t in TYPES else next((x for x in TYPES if x in t), "esprit")
+    fiche["menace"] = out.get("menace", 3)
+    fiche["attaques"] = [dict(nom=_clean(a.get("nom"), 40), genre=_clean(a.get("genre"), 20).lower(),
+                              element=_clean(a.get("element"), 20).lower(), description=_clean(a.get("description"), 200))
+                         for a in (out.get("attaques") or []) if isinstance(a, dict)][:2]
     if not fiche["description"] or not fiche["histoire"]:
         raise WriterError("La fiche est incomplète, réessaie.")
     return fiche
