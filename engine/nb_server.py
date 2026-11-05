@@ -129,6 +129,19 @@ class Studio:
         self.eng, self.writer = eng, writer
         self.upgrade_cards()
         self.upgrade_effects()
+        self.upgrade_types()
+
+    def upgrade_types(self):
+        """Une fois : les créatures d'avant les doubles types passent à une sur deux avec deux types."""
+        cfg = self.lib.load_config({})
+        if cfg.get("types", 1) >= 2:
+            return []
+        done = self.retype()
+        cfg["types"] = 2
+        self.lib.save_config(cfg)
+        if done:
+            print(f"{len(done)} créature(s) : un 2e type")
+        return done
 
     EFFECTS = 2  # 2 : les visuels signés (nb_attack_sig), un par attaque
 
@@ -396,7 +409,7 @@ class Studio:
         """Portrait de combat (version de plus de la vue « portrait »), puis sa version pixel 256x256."""
         rec = self.lib.load(slug)
         moves = self._moves(rec)
-        move = moves[-1] if moves else dict(genre="charge", element=(rec.get("lore") or {}).get("type", ""))
+        move = moves[-1] if moves else dict(genre="charge", element=(nb_stats.split((rec.get("lore") or {}).get("type")) or [""])[0])
         brief, seed = rec.get("brief"), int(time.time()) % 1000000
         draw = lambda s_: self.eng.generate_portrait(c, self._active(slug, "bas"), move, s_, progress, cancel, brief=brief,
                                                      description=rec.get("description", ""))
@@ -526,15 +539,44 @@ class Studio:
         return self.jobs.start("sketch", run, SKETCHES + 3, slug), slug
 
     def _pick_type(self, rec, lore):
-        """Le type : ce que la plume propose, les mots de la description, et les types qui manquent au bestiaire."""
-        counts = {}
+        """Le type : ce que la plume propose, les mots de la description, et les types qui manquent au bestiaire.
+        Une créature sur deux a deux types (« feu et vent ») : un double type quand le bestiaire en a moins que de simples."""
+        counts, n = {}, [0, 0]
         for r in self.lib.list():
-            t = (r.get("lore") or {}).get("type")
-            if t and r.get("slug") != rec["slug"]:
-                counts[t] = counts.get(t, 0) + 1
+            t = nb_stats.split((r.get("lore") or {}).get("type"))
+            if t and r.get("slug") != rec["slug"] and r.get("rarete_fixe") != nb_stats.UNIQUE:
+                n[len(t) - 1] += 1
+                for x in t:
+                    counts[x] = counts.get(x, 0) + 1
+        dual = n[1] < n[0] or (n[1] == n[0] and random.Random("types:" + rec["slug"]).random() < .5)
         text = " ".join(str(lore.get(k, "")) for k in ("espece", "habitat", "description", "histoire"))
-        return nb_stats.choose_type(rec.get("description", ""), text, lore.get("types_proposes", [lore.get("type")]),
-                                    counts)
+        return nb_stats.choose_types(rec.get("description", ""), text, lore.get("types_proposes", [lore.get("type")]),
+                                     counts, dual)
+
+    def retype(self):
+        """Créatures déjà faites : une sur deux reçoit un 2e type (sans réécrire la fiche), sa fiche de combat est recalculée."""
+        recs = [r for r in self.lib.list() if nb_stats.split((r.get("lore") or {}).get("type")) and r.get("rarete_fixe") != nb_stats.UNIQUE]
+        recs.sort(key=lambda r: random.Random("retype:" + r["slug"]).random())  # la moitié tirée au sort, toujours la même
+        done = []
+        for r in recs:
+            lore = r["lore"]
+            if r.get("parents") or len(nb_stats.split(lore["type"])) == 2:
+                continue
+            want = sum(len(nb_stats.split(x["lore"]["type"])) == 2 for x in recs) < len(recs) / 2
+            if not want:
+                break
+            text = " ".join(str(lore.get(k, "")) for k in ("espece", "habitat", "description", "histoire"))
+            first = nb_stats.split(lore["type"])[0]
+            lore["type"] = first + " et " + nb_stats.choose_type(r.get("description", ""), text, lore.get("types_proposes", []), {}, exclude=(first,))
+            fixed = r.get("rarete_fixe")
+            r["rarete_fixe"] = lore["combat"]["rarete"] if lore.get("combat") else fixed  # même rareté qu'avant
+            new = self._card(r)
+            new["rarete_fixe"], r["rarete_fixe"] = bool(fixed), fixed
+            r["lore"]["combat"] = new
+            self.lib.save(r)
+            self.build_attacks(r["slug"])
+            done.append((r["slug"], lore["type"]))
+        return done
 
     def _mix_lore(self, rec, lore):
         """Un hybride hérite : le type de l'un de ses parents, une attaque de chacun, la menace du plus fort."""
@@ -543,7 +585,9 @@ class Studio:
         if len(parents) != 2:
             return lore
         rnd = random.Random(rec["slug"])
-        lore["type"] = rnd.choice([p.get("type") for p in parents if p.get("type")] or [lore.get("type")])
+        firsts = list(dict.fromkeys(nb_stats.split(p.get("type"))[0] for p in parents if nb_stats.split(p.get("type"))))
+        if firsts:  # le 1er type de chaque parent : deux parents de types différents -> un double type
+            lore["type"] = " et ".join(firsts)
         moves = [(p.get("attaques") or []) for p in parents]
         mixed = moves[0][:2] + moves[1][-2:]  # les rapides de l'un, les fortes de l'autre
         if len(mixed) >= 2:
@@ -602,7 +646,7 @@ class Studio:
         weights = sum(nb_stats.WEIGHTS)
         rare = [dict(nom=r, n=sum(x["rarete"] == r for x in rows), attendu=round(100 * w / weights))
                 for r, w in zip(nb_stats.RARITIES, nb_stats.WEIGHTS)]
-        types = sorted(({"type": t, "n": sum(x["type"] == t for x in rows)} for t in nb_stats.CHART),
+        types = sorted(({"type": t, "n": sum(t in nb_stats.split(x["type"]) for x in rows)} for t in nb_stats.CHART),
                        key=lambda t: -t["n"])
         avg = {s: round(sum(x["stats"][s] for x in rows) / n) if n else 0 for s in nb_stats.STATS}
         alerts = []

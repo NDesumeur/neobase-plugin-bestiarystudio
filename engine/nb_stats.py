@@ -96,31 +96,46 @@ KEYWORDS = {
 }
 
 
+def split(typ):
+    """« feu et vent » -> ["feu", "vent"] : un double type s'écrit comme celui de NeoMe (« ombre et lumière »)."""
+    return [t for t in str(typ or "").split(" et ") if t in CHART]
+
+
 def type_scores(text):
     text = str(text or "").lower()
     return {t: len(re.findall(r"\b(?:" + KEYWORDS[t] + ")", text)) for t in KEYWORDS}  # début de mot : « étrange » n'est pas un ange
 
 
-def choose_type(description, lore_text="", proposed=(), counts=None):
+def choose_type(description, lore_text="", proposed=(), counts=None, exclude=()):
     """Le type de la créature. La plume en propose (du plus au moins crédible) ; les mots de la description comptent
     triple. Quand plusieurs types se valent, celui qui manque au bestiaire l'emporte : la plume choisit sinon
     presque toujours ombre ou esprit, et certains types n'apparaissent jamais."""
-    score = {t: 0.0 for t in CHART}
+    score = {t: 0.0 for t in CHART if t not in exclude}
     for t, n in type_scores(description).items():
-        score[t] += 3 * min(n, 3)
+        if t in score:
+            score[t] += 3 * min(n, 3)
     for t, n in type_scores(lore_text).items():
-        score[t] += min(n, 3)
-    for i, t in enumerate(p for p in proposed if p in CHART):
+        if t in score:
+            score[t] += min(n, 3)
+    for i, t in enumerate(p for p in proposed if p in score):
         score[t] += (3, 2, 1)[i] if i < 3 else 0
     counts = counts or {}
     total = sum(counts.values()) or 1
-    share = {t: counts.get(t, 0) / total for t in CHART}
+    share = {t: counts.get(t, 0) / total for t in score}
     best = max(score.values())
     if best <= 0:  # rien ne parle de type : le moins représenté (jamais « esprit » par défaut)
-        return min(CHART, key=lambda t: (share[t], t == "esprit", t))
-    near = [t for t in CHART if score[t] >= best - 1.5 and score[t] > 0]
+        return min(score, key=lambda t: (share[t], t == "esprit", t))
+    near = [t for t in score if score[t] >= best - 1.5 and score[t] > 0]
     # entre types qui se valent : le moins représenté, avec un léger avantage au score
     return max(near, key=lambda t: (score[t] - 6 * share[t], -share[t]))
+
+
+def choose_types(description, lore_text="", proposed=(), counts=None, dual=False):
+    """Un type, ou deux (« feu et vent ») : le 2e est le meilleur des autres, choisi de la même façon."""
+    first = choose_type(description, lore_text, proposed, counts)
+    if not dual:
+        return first
+    return first + " et " + choose_type(description, lore_text, proposed, counts, exclude=(first,))
 
 
 TOP = (50, 22, 8, 2)  # % du haut du classement : peu commun et mieux, rare et mieux, épique et mieux, légendaire
@@ -171,8 +186,9 @@ def stats(key, rare, typ, posture="", poids=None, taille=None):
         w["vitesse"] *= 1 - .3 * heavy
     for k, f in POSTURE_LEAN.get(posture, {}).items():
         w[k] *= f
-    for k, f in LEAN.get(typ, {}).items():
-        w[k] *= f
+    for i, t in enumerate(split(typ)):  # le 2e type penche moitié moins
+        for k, f in LEAN.get(t, {}).items():
+            w[k] *= f ** (1 if i == 0 else .5)
     r = _rng(f"stats:{key}")
     for k in w:
         w[k] *= r.uniform(.88, 1.12)
@@ -182,8 +198,12 @@ def stats(key, rare, typ, posture="", poids=None, taille=None):
 
 
 def weaknesses(typ):
-    weak, strong = CHART.get(typ, ((), ()))
-    return dict(faiblesses=list(weak), resistances=list(strong))
+    """Double type : les faiblesses et résistances des deux ; une faiblesse de l'un que l'autre résiste s'annule."""
+    weak, strong = [], []
+    for t in split(typ):
+        weak += [e for e in CHART[t][0] if e not in weak]
+        strong += [e for e in CHART[t][1] if e not in strong]
+    return dict(faiblesses=[e for e in weak if e not in strong], resistances=[e for e in strong if e not in weak])
 
 
 def portee(genre):
@@ -238,18 +258,22 @@ def pick_moves(written, count, typ, anatomy=()):
 
 def card(key, fiche, posture="", fixed=None, others=(), anatomy=()):
     """Le bloc « combat » de la fiche à partir de ce que la plume a écrit (type, poids, prestige, attaques)."""
-    typ = fiche.get("type", "esprit")
+    typ = fiche.get("type") if split(fiche.get("type")) else "esprit"
+    types = split(typ)
     try:
         menace = int(fiche.get("menace", 3))
     except (TypeError, ValueError):
         menace = 3
     prestige = fiche.get("prestige") if isinstance(fiche.get("prestige"), int) else None
     rare = rarity(key, menace, prestige, fixed, others)
-    picked = pick_moves(fiche.get("attaques") or [], MOVES[RARITIES.index(rare)], typ, anatomy)
+    picked = pick_moves(fiche.get("attaques") or [], MOVES[RARITIES.index(rare)], types[0], anatomy)
+    elems = [a.get("element") if a.get("element") in CHART else types[i % len(types)] for i, a in enumerate(picked)]
+    if len(types) == 2 and types[1] not in elems and len(elems) > 1:  # double type : au moins une attaque du 2e
+        elems[next((i for i in range(1, len(elems)) if picked[i]["genre"] not in SUPPORT), 1)] = types[1]
     moves = []
     for i, a in enumerate(picked):
         genre = a["genre"]
-        elem = a.get("element") if a.get("element") in CHART else typ
+        elem = elems[i]
         tech = nb_moves.get(elem, genre)  # la mécanique : statut, baisses de stats, précision, coups multiples…
         power = attack_power(key, i, rare, genre, len(picked))
         m = dict(nom=a.get("nom") or tech["nom"], genre=genre, element=elem, description=a.get("description", ""),
@@ -304,4 +328,14 @@ if __name__ == "__main__":
     assert choose_type("un oiseau d'orage aux plumes qui crépitent d'éclairs", proposed=["vent", "foudre"], counts=lib) in ("vent", "foudre")
     assert choose_type("une chose", counts=lib) not in lib
     assert choose_type("un dragon de lave", proposed=["ombre"], counts=lib) == "feu"  # le texte prime
+    d = card("oiseau", dict(type="vent et foudre", prestige=50, attaques=written[:2]))
+    assert d["faiblesses"] == ["foudre", "roche"] and set(d["resistances"]) == {"plante", "vent", "acier"}, d
+    assert weaknesses("feu et eau") == dict(faiblesses=["eau", "roche", "foudre"], resistances=["glace", "feu", "acier"]), weaknesses("feu et eau")  # plante : faiblesse de l'eau, résistée par le feu : s'annule
+    assert [a["element"] for a in d["attaques"]][:2] == ["vent", "foudre"], d["attaques"]
+    e = card("goule", dict(type="ombre et acier", prestige=50, attaques=[dict(nom="A", genre="morsure", element="ombre"), dict(nom="B", genre="cri", element="ombre")]))
+    assert [a["element"] for a in e["attaques"]] == ["ombre", "acier"], e["attaques"]  # la plume n'a écrit que de l'ombre
+    assert weaknesses("feu") == dict(faiblesses=["eau", "roche"], resistances=["plante", "glace"])
+    two = choose_types("un oiseau d'orage aux plumes qui crépitent d'éclairs", proposed=["vent", "foudre"], counts=lib, dual=True)
+    assert set(split(two)) == {"vent", "foudre"} and " et " in two, two
+    assert split("ombre et lumière") == ["ombre", "lumière"] and split("") == []
     print("ok", dict(c), dict(tiers), k["rarete"], genres)

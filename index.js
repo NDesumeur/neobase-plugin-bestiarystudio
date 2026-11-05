@@ -428,7 +428,7 @@ export default async function (ctx) {
     $('#iVer').textContent = iv[1] ? `${iv[0]} / ${iv[1]}` : '—';
     $('#iNote').textContent = (S.cr.illustration_note || '').replace(/^bestiaire\s*/, '');
     box.innerHTML = f ? `<div class="nbs-fiche-top">${pic ? `<div class="nbs-fiche-pic nbs-well${big ? ' big' : ''}"><img src="${pic}" alt=""></div>` : ''}
-      <div><div class="nbs-fiche-head"><b>${esc(F.nom || S.cr.name)}</b><span class="nbs-type">${esc(F.id === 'base' || F.id === 'chromatique' ? f.type : F.id)}</span></div>
+      <div><div class="nbs-fiche-head"><b>${esc(F.nom || S.cr.name)}</b>${String(F.id === 'base' || F.id === 'chromatique' ? f.type : F.id).split(' et ').map(t => `<span class="nbs-type">${esc(t)}</span>`).join('')}</div>
       <dl class="nbs-fiche-stats"><dt>Espèce</dt><dd>${esc(f.espece)}</dd><dt>Taille</dt><dd>${esc(f.taille)}</dd>
       <dt>Poids</dt><dd>${esc(f.poids)}</dd><dt>Habitat</dt><dd>${esc(f.habitat)}</dd></dl></div></div>
       <p class="nbs-read">${esc(f.description)}</p>
@@ -921,7 +921,7 @@ export default async function (ctx) {
         <div class="nbs-title" style="margin-top:14px">Classement</div>
         <div class="nbs-eqlist">${B.creatures.sort((x, y) => y.total - x.total).map(c => `<div class="nbs-eqrow" data-s="${esc(c.slug)}">
           <img src="${U}lib/${encodeURIComponent(c.slug)}/sprites/bas_repos.png" alt=""><span class="nm">${esc(c.nom)}</span>
-          <span class="nbs-rare r${RAR.indexOf(c.rarete)}">${esc(c.rarete)}</span><span class="nbs-chip">${esc(c.type)}</span>
+          <span class="nbs-rare r${RAR.indexOf(c.rarete)}">${esc(c.rarete)}</span>${String(c.type || '').split(' et ').map(t => `<span class="nbs-chip">${esc(t)}</span>`).join('')}
           <em>${c.total}</em>${c.variantes ? `<span class="nbs-hint">+${c.variantes} var.</span>` : ''}</div>`).join('')}</div>
       </div></div>`;
     $$('#eq .nbs-eqrow[data-s]').forEach(row => row.onclick = async () => { await open(row.dataset.s); show('dirs'); });

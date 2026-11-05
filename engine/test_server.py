@@ -258,7 +258,8 @@ def main():
             wait_job(port)
             _, c = call(port, "/creature?slug=" + fu["slug"])
             pa = [call(port, "/creature?slug=" + s_)[1]["lore"] for s_ in (r["slug"], r2["slug"])]
-            assert c["lore"]["type"] in {p["type"] for p in pa}, c["lore"]["type"]
+            import nb_stats
+            assert set(nb_stats.split(c["lore"]["type"])) == {nb_stats.split(p["type"])[0] for p in pa}, c["lore"]["type"]  # le 1er type de chaque parent
             names = [a["nom"] for a in c["lore"]["attaques"]]
             assert names == [a["nom"] for a in pa[0]["attaques"][:2] + pa[1]["attaques"][-2:]], names
             # posture écrite en toutes lettres (« rampante ») : elle prime sur ce que la plume a compris
