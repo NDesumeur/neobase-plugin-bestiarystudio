@@ -128,6 +128,25 @@ class Studio:
             import nb_writer as writer
         self.eng, self.writer = eng, writer
         self.upgrade_cards()
+        self.upgrade_effects()
+
+    EFFECTS = 2  # 2 : les visuels signés (nb_attack_sig), un par attaque
+
+    def upgrade_effects(self):
+        """Les créatures d'avant les visuels signés : leurs effets d'attaque sont redessinés une fois (corps inchangés)."""
+        cfg = self.lib.load_config({})
+        if cfg.get("effets", 1) >= self.EFFECTS:
+            return 0
+        done = 0
+        for rec in self.lib.list():
+            if self._moves(rec) and (self.lib.sprites_dir(rec["slug"]) / "bas_repos.png").is_file():
+                self.build_attacks(rec["slug"])
+                done += 1
+        cfg["effets"] = self.EFFECTS
+        self.lib.save_config(cfg)
+        if done:
+            print(f"{done} créature(s) : effets d'attaque redessinés")
+        return done
 
     def upgrade_cards(self):
         """Les fiches d'avant le catalogue des 204 attaques reçoivent leur mécanique (mêmes gestes, mêmes noms)."""
@@ -544,6 +563,8 @@ class Studio:
                 if r.get("slug") != but and isinstance((r.get("lore") or {}).get("prestige"), int)]
 
     def _card(self, rec):
+        if rec.get("rarete_fixe") == nb_stats.UNIQUE:
+            return rec["lore"]["combat"]  # la créature unique garde sa fiche écrite à la main
         brief = rec.get("brief") or {}
         return nb_stats.card(rec["slug"], rec["lore"], brief.get("posture", ""), rec.get("rarete_fixe"),
                              self._prestiges(rec["slug"]), brief.get("anatomie", []))
@@ -553,6 +574,8 @@ class Studio:
         rec = self.lib.load(slug)
         if rec is None or not (rec.get("lore") or {}).get("combat"):
             raise ValueError("Pas encore de fiche de combat.")
+        if rec.get("rarete_fixe") == nb_stats.UNIQUE:
+            raise ValueError("Cette créature est unique : sa rareté ne change pas.")
         if rarete not in (None, "", *nb_stats.RARITIES):
             raise ValueError("Rareté inconnue.")
         rec["rarete_fixe"] = rarete or None
@@ -637,6 +660,8 @@ class Studio:
         if not self.jobs.get()["running"] or self.jobs.get()["slug"] == slug:
             self._free_gpu()
         rec = self.lib.load(slug)
+        if rec.get("rarete_fixe") == nb_stats.UNIQUE:
+            raise ValueError("Cette créature est unique : sa fiche ne se réécrit pas.")
         lore = self.writer.lore(rec["name"], rec.get("description", ""), int(time.time()) % 100000)
         lore["type"] = self._pick_type(rec, lore)
         rec["lore"] = self._mix_lore(rec, lore)
@@ -971,7 +996,8 @@ class Studio:
                 rest = folder / f"{d}_repos.png"
                 if not rest.is_file():
                     continue
-                frames = nb_attack.attack(Image.open(rest).convert("RGBA"), d, move["genre"], move["element"], legs)
+                frames = nb_attack.attack(Image.open(rest).convert("RGBA"), d, move["genre"], move["element"], legs,
+                                          move.get("visuel"))
                 fx[str(n)][d] = []
                 for i, f in enumerate(frames):
                     f["body"].save(folder / f"attaque{n}_{d}_{i}.png")
@@ -1065,7 +1091,7 @@ class Studio:
             description=lore.get("description", ""), mis_a_jour=rec.get("updated", 0), case=CELL, directions=list(DIRS),
             marche=dict(image="sheet.png", images=list(FRAMES), ordre=CYCLE, ms=90),
             animations={n: dict(image=f"{n}.png", ms=list(t)) for n, t in nb_anim.ANIMS.items()},
-            portrait=(sd / "portrait.png").is_file(),
+            portrait=(sd / "portrait.png").is_file(), **({"numero": rec["numero"]} if "numero" in rec else {}),
             formes=[dict(id=f["id"], nom=f["nom"], dossier=f["dossier"], combat=f["combat"],
                          attaques=[dict(a, image=f"attaque{n}.png", effet=f"effet{n}.png", ms=list(nb_attack.TIMING),
                                         decalages={d: [dict(x=e["offset"][0], y=e["offset"][1], visible=e["effect"])

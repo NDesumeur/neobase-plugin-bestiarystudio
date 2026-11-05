@@ -15,6 +15,7 @@ import re
 import nb_moves
 
 RARITIES = ("commun", "peu commun", "rare", "épique", "légendaire")
+UNIQUE = "???"  # au-dessus de tout : une créature unique (n° 0, NeoMe), sa fiche est écrite à la main et ne se recalcule jamais
 WEIGHTS = (50, 28, 14, 6, 2)  # sur 100 créatures : ~2 légendaires
 THRESHOLDS = (40, 60, 75, 88)  # prestige -> rareté, tant que le bestiaire est trop petit pour un classement
 RANKED = 10  # à partir de combien de créatures la rareté vient du classement

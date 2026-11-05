@@ -415,7 +415,7 @@ export default async function (ctx) {
     try { S.form = v; refresh(await post('/variant', { slug: S.cr.slug, variant: v })); $('#varMsg').textContent = 'Variante prête ✓'; }
     catch (e) { $('#varMsg').textContent = e.message; }
   };
-  const RAR = ['commun', 'peu commun', 'rare', 'épique', 'légendaire'];
+  const RAR = ['commun', 'peu commun', 'rare', 'épique', 'légendaire', '???'];  // ??? : la créature unique (n° 0, NeoMe)
 
   // ------------------------------------------------------------ fiche
   function renderFiche() {
@@ -455,9 +455,9 @@ export default async function (ctx) {
     if (!k) return '';
     const chips = (l, cls) => l.map(t => `<span class="nbs-chip ${cls}">${esc(t)}</span>`).join(' ') || '—';
     const base = form().id === 'base';
-    const rar = base ? `<select class="nbs-rarsel" id="rarSel" title="Rareté : calculée d'après le prestige, ou choisie à la main">
+    const rar = base && k.rarete !== '???' ? `<select class="nbs-rarsel" id="rarSel" title="Rareté : calculée d'après le prestige, ou choisie à la main">
         <option value="">auto${k.prestige != null ? ` · prestige ${k.prestige}` : ''}</option>
-        ${RAR.map(r => `<option value="${r}"${k.rarete_fixe && k.rarete === r ? ' selected' : ''}>${r} (fixée)</option>`).join('')}</select>` : '';
+        ${RAR.slice(0, 5).map(r => `<option value="${r}"${k.rarete_fixe && k.rarete === r ? ' selected' : ''}>${r} (fixée)</option>`).join('')}</select>` : '';
     return `<div class="nbs-combat">${portrait ? `<div class="nbs-fiche-pic nbs-well nbs-combat-pic"><img src="${portrait}" alt="" title="Portrait de combat"></div>` : ''}<div class="nbs-combat-head"><span class="nbs-rare r${RAR.indexOf(k.rarete)}">${esc(k.rarete)}</span>${k.rarete_fixe ? ' <span class="nbs-pow">🔒</span>' : ''} ${rar}</div>
       <div class="nbs-statgrid">${Object.entries(STAT).map(([key, label]) => `<span>${label}</span><i><b style="width:${Math.min(100, k.stats[key])}%"></b></i><em>${k.stats[key]}</em>`).join('')}</div>
       <div class="nbs-read nbs-weak"><b>Faible contre</b> ${chips(k.faiblesses, 'bad')} &nbsp; <b>Résiste à</b> ${chips(k.resistances, 'good')}</div>

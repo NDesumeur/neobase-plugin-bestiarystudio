@@ -104,6 +104,8 @@ def card(base, vid):
     """La fiche de combat de la variante : chromatique = un cran de rareté de plus ; élément = nouveau type."""
     out = dict(base, stats=dict(base["stats"]), attaques=[dict(a) for a in base["attaques"]])
     if vid == "chromatique":
+        if base["rarete"] not in nb_stats.RARITIES:
+            return out  # rien au-dessus d'une créature unique
         i = nb_stats.RARITIES.index(base["rarete"])
         out["rarete"] = nb_stats.RARITIES[min(i + 1, len(nb_stats.RARITIES) - 1)]
         return out

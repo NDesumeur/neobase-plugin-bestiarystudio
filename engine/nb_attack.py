@@ -11,6 +11,8 @@ import random
 
 from PIL import Image, ImageChops, ImageDraw
 
+import nb_attack_sig as sig
+
 CELL = 64
 FRAMES = 4
 TIMING = (110, 80, 130, 120)  # ms par image : élan, frappe, impact, retour
@@ -196,9 +198,18 @@ def _decor(im, element, seed):
     return im
 
 
-def _effect(genre, element, i):
-    """Image i (0..3) de l'effet, orientée vers le bas, ancre ANCHOR. None = pas d'effet sur cette image."""
+def _effect(genre, element, i, visual=None):
+    """Image i (0..3) de l'effet, orientée vers le bas, ancre ANCHOR. None = pas d'effet sur cette image.
+    visual : un visuel propre à une créature (NeoMe) ; sinon le visuel signé de (élément, geste) s'il existe."""
+    if visual in sig.NEOME_VISUALS:
+        im = sig.neome(visual, i)
+        return None if im is None else _outline(_fade(im, .5) if i == 3 else im, sig.NEOME[0])
     dark, mid, light, core = (_rgb(c) for c in PALETTE.get(element, PALETTE["esprit"]))
+    if (element, genre) in sig.SIGNED:
+        im = sig.signed(genre, element, i, (dark, mid, light, core))
+        if im is None or not im.getbbox():
+            return None
+        return _outline(_fade(im, .5) if i == 3 and genre != "projectile" else im, dark)
     im = Image.new("RGBA", (CELL, CELL))
     d = ImageDraw.Draw(im)
     ax, ay = ANCHOR
@@ -398,7 +409,7 @@ def _anchor(direction, genre):
             "droite": (ay, ax)}[direction]
 
 
-def attack(rest, direction, genre, element, legs=True):
+def attack(rest, direction, genre, element, legs=True, visual=None):
     """[{"body": 64x64, "effect": 64x64 ou None, "offset": (dx, dy)}] x 4 : offset = position de la case d'effet
     par rapport à la case du corps (coin haut-gauche)."""
     bodies = body_frames(rest, direction, legs, genre)
@@ -413,7 +424,7 @@ def attack(rest, direction, genre, element, legs=True):
     for i in range(FRAMES):
         lean = 0 if genre in SELF else LEANS.get(genre, LEAN)[i]
         off = (origin[0] - ax + fx * lean, origin[1] - ay + fy * lean)
-        fx_im = _effect(genre, element, i)
+        fx_im = _effect(genre, element, i, visual)
         out.append(dict(body=bodies[i], effect=fx_im if genre in SELF else _orient(fx_im, direction), offset=off))
     return out
 
