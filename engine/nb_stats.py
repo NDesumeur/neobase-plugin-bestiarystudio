@@ -10,6 +10,7 @@ nombre d'attaques aussi (2 à 4).
 """
 import hashlib
 import random
+import math
 import re
 
 import nb_moves
@@ -47,19 +48,19 @@ STATUS = nb_moves.STATUS_OF  # élément -> statut infligé (la chance dépend d
 
 # table des types, façon Pokémon : élément de l'attaque -> (×2 contre, ×½ contre, ×0 contre). Un double type multiplie
 # les deux (×4, ×¼, ou une faiblesse que l'autre résiste : ×1). L'Arène lit les multiplicateurs dans la fiche de combat.
-EFF = {  # chaque case a sa raison : on la lit « une attaque de <ligne> contre une créature de <type> »
-    "feu": (("plante", "glace", "acier"), ("feu", "eau", "roche"), ()),  # brûle les plantes, fond la glace et le métal ; l'eau l'éteint, la pierre ne brûle pas
-    "eau": (("feu", "roche"), ("eau", "plante", "glace", "acier"), ()),  # éteint le feu, use la pierre ; les plantes la boivent, le métal la laisse glisser
-    "plante": (("eau", "roche"), ("feu", "plante", "vent", "poison", "acier"), ()),  # boit l'eau, ses racines fendent la roche
-    "vent": (("plante", "poison"), ("roche", "foudre", "acier", "vent", "glace"), ()),  # couche les plantes, chasse les miasmes ; la pierre et le métal ne bougent pas, la glace vit dans le blizzard
-    "roche": (("feu", "glace", "vent", "foudre"), ("roche", "acier"), ()),  # étouffe le feu, brise la glace, abat ce qui vole, met la foudre à la terre
-    "glace": (("plante", "vent"), ("feu", "eau", "glace", "acier"), ()),  # gèle les plantes et les ailes
-    "foudre": (("eau", "vent", "acier"), ("plante", "foudre", "esprit"), ("roche",)),  # l'eau et le métal conduisent ; la terre l'absorbe
-    "lumière": (("ombre", "esprit"), ("feu", "lumière", "acier", "plante"), ()),  # chasse les ténèbres et les fantômes ; les plantes s'en nourrissent, le métal la renvoie
-    "ombre": (("lumière", "esprit"), ("ombre", "feu"), ()),  # éteint la lumière, dévore les esprits ; le feu l'éclaire
-    "esprit": (("poison",), ("lumière", "esprit"), ("acier",)),  # l'esprit purifie le poison ; une machine n'a pas d'âme
-    "acier": (("glace", "roche"), ("feu", "eau", "foudre", "acier"), ()),  # brise la glace et la pierre ; rouille, fond, conduit
-    "poison": (("plante", "eau"), ("poison", "roche", "vent", "esprit", "ombre"), ("acier",)),  # empoisonne les plantes et l'eau ; rien à ronger sur l'acier, ni sur ce qui n'a pas de chair
+EFF = {  # chaque case a sa raison : « une attaque de <ligne> contre une créature de <type> ». Équilibrée : voir le test en bas
+    "feu": (("plante", "glace", "acier"), ("feu", "eau", "roche", "lumière"), ()),  # brûle les plantes, fond la glace et le métal ; l'eau l'éteint, la pierre ne brûle pas, la lumière est déjà flamme
+    "eau": (("feu", "roche", "acier"), ("eau", "plante", "glace"), ()),  # éteint le feu, use la pierre, rouille le métal ; les plantes la boivent, la glace la fige
+    "plante": (("eau", "roche"), ("feu", "plante", "vent", "acier", "poison"), ()),  # boit l'eau, ses racines fendent la roche ; le venin la flétrit
+    "vent": (("plante", "poison"), ("roche", "acier", "vent"), ()),  # couche les plantes, chasse les miasmes ; la pierre et le métal ne bougent pas
+    "roche": (("feu", "glace", "vent", "foudre"), ("roche", "acier", "plante"), ()),  # étouffe le feu, brise la glace, abat ce qui vole, met la foudre à la terre ; les racines l'enserrent
+    "glace": (("plante", "vent", "roche"), ("feu", "eau", "glace", "acier"), ()),  # gèle les plantes et les ailes, le gel fend la pierre
+    "foudre": (("eau", "vent", "acier"), ("plante", "foudre", "esprit"), ("roche",)),  # l'eau, l'air et le métal conduisent ; la terre l'absorbe, un esprit n'a pas de corps
+    "lumière": (("ombre", "esprit"), ("lumière", "plante", "feu"), ()),  # chasse les ténèbres et les fantômes ; les plantes s'en nourrissent, le feu brille déjà
+    "ombre": (("lumière", "esprit"), ("ombre",), ()),  # éteint la lumière, dévore les esprits
+    "esprit": (("poison", "ombre"), ("lumière", "esprit", "acier"), ()),  # purifie le poison, dissipe les cauchemars ; une machine n'a pas d'âme
+    "acier": (("glace", "roche"), ("feu", "eau", "foudre", "acier"), ()),  # brise la glace et la pierre ; fond, rouille, conduit
+    "poison": (("plante", "eau"), ("poison", "acier", "ombre"), ()),  # empoisonne les plantes et l'eau ; ronge mal le métal et ce qui n'a pas de chair
 }
 
 
@@ -350,14 +351,17 @@ if __name__ == "__main__":
     assert w["multiplicateurs"]["feu"] == 4 and w["faiblesses"][0] == "feu", w  # double faiblesse : ×4
     w = weaknesses("feu et eau")
     assert w["multiplicateurs"]["feu"] == .25 and "plante" not in w["multiplicateurs"], w  # ×¼ ; plante : ×2 et ×½ -> ×1
-    assert mult("poison", "acier") == 0 and mult("feu", "plante") == 2 and mult("eau", "eau") == .5
+    assert mult("poison", "acier") == .5 and mult("feu", "plante") == 2 and mult("eau", "eau") == .5
     assert [a["element"] for a in d["attaques"]][:2] == ["vent", "foudre"], d["attaques"]
     e = card("goule", dict(type="ombre et acier", prestige=50, attaques=[dict(nom="A", genre="morsure", element="ombre"), dict(nom="B", genre="cri", element="ombre")]))
     assert [a["element"] for a in e["attaques"]] == ["ombre", "acier"], e["attaques"]  # la plume n'a écrit que de l'ombre
-    assert weaknesses("feu")["faiblesses"] == ["eau", "roche"] and set(weaknesses("feu")["resistances"]) == {"feu", "plante", "glace", "acier", "lumière", "ombre"}
+    assert weaknesses("feu")["faiblesses"] == ["eau", "roche"] and set(weaknesses("feu")["resistances"]) == {"feu", "plante", "glace", "acier", "lumière"}
     for t in EFF:  # chaque type a au moins une faiblesse et deux résistances ou immunités
         w = weaknesses(t)
         assert w["faiblesses"] and len(w["resistances"]) + len(w["immunites"]) >= 2, (t, w)
+        lg = lambda v: math.log2(v) if v else -2  # équilibre : attaque (×2 = +1, ×½ = -1, ×0 = -2) + défense, entre -2 et +2
+        score = sum(lg(mult(t, d)) for d in EFF) - sum(lg(mult(a, t)) for a in EFF)
+        assert abs(score) <= 2, (t, score)
     two = choose_types("un oiseau d'orage aux plumes qui crépitent d'éclairs", proposed=["vent", "foudre"], counts=lib, dual=True)
     assert set(split(two)) == {"vent", "foudre"} and " et " in two, two
     assert "lumière" not in choose_types("une ombre de la nuit noire, un démon solaire doré radieux", proposed=["ombre", "lumière"], dual=True)  # NeoMe seul
