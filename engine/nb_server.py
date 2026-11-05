@@ -113,6 +113,42 @@ class Jobs:
 
 # --------------------------------------------------------------------------- studio
 
+SIG_PICK = {  # pour chaque visuel signature : (ligne, image) de la planche 10 x 3 pour élan, frappe, impact, retour ; les lignes 1 vont dans la direction
+    "eclipse": [(0, 3), (0, 6), (2, 3), (2, 6)],
+    "regard": [(0, 4), (1, 3), (2, 3), (2, 7)],
+    "casque": [(0, 4), (1, 4), (2, 3), (2, 7)],
+    "coquille": [(0, 2), (0, 4), (0, 6), (0, 8)],
+}
+SIG_STEP = {"bas": (0, 1), "haut": (0, -1), "gauche": (-1, 0), "droite": (1, 0)}
+
+
+def _signature_sheet(folder, visuel):
+    """La planche signature (10 images x 3 lignes de 128 px) du dossier signature/ de la créature, si elle en a une pour ce visuel."""
+    if visuel not in SIG_PICK:
+        return None
+    for p in [folder, *list(Path(folder).parents)[:3]]:
+        f = Path(p) / "signature" / f"{visuel}.png"
+        if f.is_file():
+            return Image.open(f).convert("RGBA")
+    return None
+
+
+def _signature_frame(sheet, move, d, i):
+    """Une image d'effet 64 px tirée de la planche signature : tournée vers la direction pour ce qui voyage (ligne 1),
+    poussée vers la cible pour la frappe et l'impact d'une attaque à distance."""
+    row, col = SIG_PICK[move["visuel"]][i]
+    im = sheet.crop((col * 128, row * 128, col * 128 + 128, row * 128 + 128))
+    if row == 1:  # dessinée vers la droite
+        im = {"gauche": ImageOps.mirror(im), "haut": im.rotate(90), "bas": im.rotate(-90)}.get(d, im)
+    im = im.resize((CELL, CELL), Image.BOX)
+    a = im.getchannel("A").point(lambda v: 255 if v > 110 else 0)  # contour net, comme le reste du pixel art
+    im.putalpha(a)
+    far = move.get("portee") == "distance" and i in (1, 2, 3)
+    dx, dy = SIG_STEP[d]
+    k = (18, 30, 30)[i - 1] if far else 0
+    return im, (dx * k, dy * k + 2)
+
+
 class Studio:
     def __init__(self, library, comfy_root, comfy_url, fake=False):
         self.lib = nb_library.Library(library)
@@ -1102,6 +1138,10 @@ class Studio:
                     continue
                 frames = nb_attack.attack(Image.open(rest).convert("RGBA"), d, move["genre"], move["element"], legs,
                                           move.get("visuel"))
+                sig = _signature_sheet(folder, move.get("visuel"))
+                if sig is not None:  # une attaque signature : ses effets viennent de sa grande planche (les mêmes que dans l'Arène)
+                    for i, f in enumerate(frames):
+                        f["effect"], f["offset"] = _signature_frame(sig, move, d, i)
                 fx[str(n)][d] = []
                 for i, f in enumerate(frames):
                     f["body"].save(folder / f"attaque{n}_{d}_{i}.png")
