@@ -134,11 +134,11 @@ class Studio:
     def upgrade_types(self):
         """Une fois : les créatures d'avant les doubles types passent à une sur deux avec deux types."""
         cfg = self.lib.load_config({})
-        if cfg.get("types", 1) >= 3:
+        if cfg.get("types", 1) >= 4:  # 4 : la table des types revue (plus de résistances)
             return []
         done = self.retype() if cfg.get("types", 1) < 2 else []
         n = self.recard()
-        cfg["types"] = 3
+        cfg["types"] = 4
         self.lib.save_config(cfg)
         if done or n:
             print(f"{len(done)} créature(s) : un 2e type ; {n} fiche(s) : table des types")
