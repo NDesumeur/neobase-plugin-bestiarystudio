@@ -20,6 +20,10 @@ def motion(description, brief=None):
     return None
 
 
+def floats(description, brief=None):
+    return (brief or {}).get("posture") == "flotte"
+
+
 def said_posture(description):
     return "rampe" if "rampante" in description else ""
 

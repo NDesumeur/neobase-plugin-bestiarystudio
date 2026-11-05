@@ -689,6 +689,8 @@ export default async function (ctx) {
   const anim = setInterval(() => {
     if (!view.isConnected) { clearInterval(anim); S.alive = false; return; }
     tick++;
+    const floats = S.cr?.brief?.posture === 'flotte';  // elle flotte : un va-et-vient en CSS, ses images ne changent pas
+    if (S.cr) $$('img.w, #hero').forEach(i => i.classList.toggle('nbs-float', floats));
     if (S.cr) $$('img.w').forEach(i => { const s = sprite(i.dataset.d, CYCLE[tick % CYCLE.length]); if (i.getAttribute('src') !== s) i.src = s; i.style.visibility = s ? '' : 'hidden'; });
     if (S.cr && S.tab === 'dirs') { $$('.nbs-atk-cv').forEach(cv => drawAttack(cv, cv.dataset.n, cv.dataset.d, Math.min(3, tick % 7))); drawAnims(); }
     if (S.tab !== 'lab' || !S.cr) return;

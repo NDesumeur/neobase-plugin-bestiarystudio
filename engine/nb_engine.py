@@ -6,6 +6,7 @@ pondérations, pas de négatifs imposés. FLUX.2 klein sait aussi éditer à par
 (ReferenceLatent) : c'est ce qui fait tourner la créature et l'anime en gardant son design.
 """
 import math
+import re
 import uuid
 
 from PIL import Image, ImageChops, ImageOps
@@ -559,7 +560,7 @@ def bob(im, phase):
 
 def has_wings(description, brief=None):
     text = " ".join([description, (brief or {}).get("en", "")] + list((brief or {}).get("anatomie", []))).lower()
-    return "wing" in text or "aile" in text
+    return bool(re.search(r"\b(wing(s|ed)?|ailes?|ail[ée]e?s?)\b", text))  # mots entiers : « glowing » contient « wing »
 
 
 def flap(im, direction, phase):
@@ -814,9 +815,20 @@ def sway(im, direction, phase):
 MOTION = {"rampe": wave, "nage": swim, "sautille": hop, "roule": roll, "glisse": jelly, "enracine": sway}
 
 
+def floats(description, brief=None):
+    """Elle flotte sans ailes : aucune image de mouvement, le flottement (un lent va-et-vient vertical) est joué à l'affichage."""
+    return (brief or {}).get("posture") == "flotte" and not has_wings(description, brief)
+
+
+def still(im, direction, phase):
+    return im.copy()
+
+
 def motion(description, brief=None):
     """Le mouvement procédural de la créature, f(image, direction, phase), ou None (elle marche sur ses pattes)."""
     p = (brief or {}).get("posture")
+    if floats(description, brief):
+        return still
     if has_wings(description, brief) and (p in FLOATING or not has_legs(description, brief)):
         return flap
     if p in MOTION:

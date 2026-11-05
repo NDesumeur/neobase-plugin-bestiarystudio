@@ -127,6 +127,8 @@
   box-shadow: 0 0 0 4px var(--ink0), 0 0 0 8px var(--brass3); }
 .nbs-world .road { position: absolute; left: 0; right: 0; top: 128px; height: 64px; background: url(road.png) 0 0 / 64px; }
 .nbs-world .hero { position: absolute; width: 128px; height: 128px; image-rendering: pixelated; }
+/* une créature qui flotte : la même image, un lent va-et-vient vertical (pas d'images de marche) */
+.nbs-float { animation: nbsFloat 1.8s ease-in-out infinite; } @keyframes nbsFloat { 50% { translate: 0 -6px; } }
 .nbs-keys { color: var(--parch2); text-shadow: 2px 2px 0 var(--ink0); }
 .nbs-opt { display: flex; align-items: center; gap: 10px; color: var(--parch); text-shadow: 2px 2px 0 var(--ink0); }
 .nbs-check { width: 28px; height: 28px; background: var(--ink0); box-shadow: inset 0 0 0 2px var(--brass2); display: grid; place-items: center; }

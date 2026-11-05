@@ -130,6 +130,37 @@ class Studio:
         self.upgrade_cards()
         self.upgrade_effects()
         self.upgrade_types()
+        self.upgrade_float()
+
+    def upgrade_float(self):
+        """Une fois : les créatures qui flottent (sans ailes) perdent leurs images de marche tassées : la même image partout,
+        le flottement est joué à l'affichage (arene.json : marche.flotte)."""
+        cfg = self.lib.load_config({})
+        if cfg.get("flotte"):
+            return 0
+        done = 0
+        for rec in self.lib.list():
+            if self.eng.floats(rec.get("description", ""), rec.get("brief")) and self._still_walk(rec["slug"]):
+                self.build_sprites(rec["slug"])
+                done += 1
+        cfg["flotte"] = 1
+        self.lib.save_config(cfg)
+        if done:
+            print(f"{done} créature(s) qui flottent : marche sans images de mouvement")
+        return done
+
+    def _still_walk(self, slug):
+        """Chaque image de marche devient la vue de repos de sa direction. False : rien à changer."""
+        changed = False
+        for d in DIRS:
+            view = self._active(slug, d)
+            if view is None:
+                continue
+            for f in FRAMES:
+                if f != "repos":
+                    self.lib.add_pil(slug, frame_key(d, f), view.copy(), "flotte")
+                    changed = True
+        return changed
 
     def upgrade_types(self):
         """Une fois : les créatures d'avant les doubles types passent à une sur deux avec deux types."""
@@ -1162,7 +1193,8 @@ class Studio:
         meta = dict(
             format=1, slug=slug, nom=rec["name"], type=lore.get("type"), espece=lore.get("espece"),
             description=lore.get("description", ""), mis_a_jour=rec.get("updated", 0), case=CELL, directions=list(DIRS),
-            marche=dict(image="sheet.png", images=list(FRAMES), ordre=CYCLE, ms=90),
+            marche=dict(image="sheet.png", images=list(FRAMES), ordre=CYCLE, ms=90,
+                        **({"flotte": True} if self.eng.floats(rec.get("description", ""), rec.get("brief")) else {})),
             animations={n: dict(image=f"{n}.png", ms=list(t)) for n, t in nb_anim.ANIMS.items()},
             portrait=(sd / "portrait.png").is_file(), **({"numero": rec["numero"]} if "numero" in rec else {}),
             formes=[dict(id=f["id"], nom=f["nom"], dossier=f["dossier"], combat=f["combat"],
