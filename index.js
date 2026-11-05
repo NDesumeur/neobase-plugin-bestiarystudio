@@ -453,6 +453,7 @@ export default async function (ctx) {
     : `<span class="nbs-pow">puissance ${a.puissance}</span>${a.statut ? ` <span class="nbs-pow">· ${STATUT[a.statut.nom] || esc(a.statut.nom)} (${a.statut.chance} %)</span>` : ''}`;
   function combat(k, portrait) {
     if (!k) return '';
+    const xm = (k, e) => ({4: ' ×4', 2: ' ×2', .5: ' ×½', .25: ' ×¼'})[(k.multiplicateurs || {})[e]] || '';  // table des types : ×4, ×2, ×½, ×¼
     const chips = (l, cls) => l.map(t => `<span class="nbs-chip ${cls}">${esc(t)}</span>`).join(' ') || '—';
     const base = form().id === 'base';
     const rar = base && k.rarete !== '???' ? `<select class="nbs-rarsel" id="rarSel" title="Rareté : calculée d'après le prestige, ou choisie à la main">
@@ -460,7 +461,7 @@ export default async function (ctx) {
         ${RAR.slice(0, 5).map(r => `<option value="${r}"${k.rarete_fixe && k.rarete === r ? ' selected' : ''}>${r} (fixée)</option>`).join('')}</select>` : '';
     return `<div class="nbs-combat">${portrait ? `<div class="nbs-fiche-pic nbs-well nbs-combat-pic"><img src="${portrait}" alt="" title="Portrait de combat"></div>` : ''}<div class="nbs-combat-head"><span class="nbs-rare r${RAR.indexOf(k.rarete)}">${esc(k.rarete)}</span>${k.rarete_fixe ? ' <span class="nbs-pow">🔒</span>' : ''} ${rar}</div>
       <div class="nbs-statgrid">${Object.entries(STAT).map(([key, label]) => `<span>${label}</span><i><b style="width:${Math.min(100, k.stats[key])}%"></b></i><em>${k.stats[key]}</em>`).join('')}</div>
-      <div class="nbs-read nbs-weak"><b>Faible contre</b> ${chips(k.faiblesses, 'bad')} &nbsp; <b>Résiste à</b> ${chips(k.resistances, 'good')}</div>
+      <div class="nbs-read nbs-weak"><b>Faible contre</b> ${chips(k.faiblesses.map(e => e + xm(k, e)), 'bad')} &nbsp; <b>Résiste à</b> ${chips(k.resistances.map(e => e + xm(k, e)), 'good')}${(k.immunites || []).length ? ` &nbsp; <b>Immunisé contre</b> ${chips(k.immunites, 'good')}` : ''}</div>
       ${k.attaques.map((a, i) => `<div class="nbs-move"><div class="nbs-move-t">${i + 1}. ${esc(a.nom)} <span class="nbs-chip">${esc(a.element)}</span> <span class="nbs-chip">${GENRE[a.genre] || esc(a.genre)}</span> ${moveExtra(a)}</div><p class="nbs-read">${esc(a.description)}</p></div>`).join('')}</div>`;
   }
   // ------------------------------------------------------------ attaques animées (corps + calque d'effet)

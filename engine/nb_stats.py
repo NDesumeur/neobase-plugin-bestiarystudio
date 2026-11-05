@@ -45,21 +45,36 @@ BY_TYPE = {"feu": "souffle", "eau": "projectile", "plante": "fouet", "vent": "ra
            "foudre": "rayon", "lumière": "rayon", "ombre": "onde", "esprit": "cri", "acier": "charge", "poison": "dard"}
 STATUS = nb_moves.STATUS_OF  # élément -> statut infligé (la chance dépend de l'attaque : voir nb_moves)
 
-# type -> (faiblesses, résistances)
-CHART = {
-    "feu": (("eau", "roche"), ("plante", "glace")),
-    "eau": (("foudre", "plante"), ("feu", "acier")),
-    "plante": (("feu", "glace", "poison"), ("eau", "roche")),
-    "vent": (("foudre", "roche"), ("plante",)),
-    "roche": (("eau", "plante", "acier"), ("feu", "vent")),
-    "glace": (("feu", "roche", "acier"), ("glace",)),
-    "foudre": (("roche",), ("vent", "acier")),
-    "lumière": (("ombre",), ("esprit",)),
-    "ombre": (("lumière",), ("esprit", "poison")),
-    "esprit": (("ombre",), ("poison",)),
-    "acier": (("feu", "foudre"), ("glace", "poison", "plante")),
-    "poison": (("esprit", "acier"), ("plante",)),
+# table des types, façon Pokémon : élément de l'attaque -> (×2 contre, ×½ contre, ×0 contre). Un double type multiplie
+# les deux (×4, ×¼, ou une faiblesse que l'autre résiste : ×1). L'Arène lit les multiplicateurs dans la fiche de combat.
+EFF = {
+    "feu": (("plante", "glace", "acier"), ("feu", "eau", "roche"), ()),
+    "eau": (("feu", "roche"), ("eau", "plante"), ()),
+    "plante": (("eau", "roche"), ("feu", "plante", "vent", "poison", "acier"), ()),
+    "vent": (("plante",), ("roche", "foudre", "acier"), ()),
+    "roche": (("feu", "glace", "vent", "foudre"), ("acier",), ()),
+    "glace": (("plante", "vent"), ("feu", "eau", "glace", "acier"), ()),
+    "foudre": (("eau", "vent", "acier"), ("plante", "foudre"), ("roche",)),
+    "lumière": (("ombre",), ("feu", "lumière", "acier"), ()),
+    "ombre": (("lumière", "esprit"), ("ombre",), ()),
+    "esprit": (("poison", "esprit"), ("lumière", "ombre", "acier"), ()),
+    "acier": (("glace", "roche", "poison"), ("feu", "eau", "foudre", "acier"), ()),
+    "poison": (("plante",), ("poison", "roche", "ombre", "esprit"), ("acier",)),
 }
+
+
+def mult(element, typ):
+    """Multiplicateur d'une attaque de cet élément contre ce type (simple ou double)."""
+    m = 1.0
+    for t in split(typ):
+        up, down, none = EFF.get(element, ((), (), ()))
+        m *= 2 if t in up else .5 if t in down else 0 if t in none else 1
+    return m
+
+
+# type -> (faiblesses, résistances) d'un type simple, tiré de la table
+CHART = {t: (tuple(e for e in EFF if t in EFF[e][0]), tuple(e for e in EFF if t in EFF[e][1] or t in EFF[e][2])) for t in EFF}
+OPPOSED = {"ombre": "lumière", "lumière": "ombre"}  # « ombre et lumière » : NeoMe seul
 # penchant de chaque type (multiplie le poids d'une statistique)
 LEAN = {"feu": {"attaque": 1.25}, "eau": {"pv": 1.2}, "plante": {"pv": 1.2, "defense": 1.1},
         "vent": {"vitesse": 1.35}, "roche": {"defense": 1.4, "vitesse": .8}, "glace": {"defense": 1.15},
@@ -135,7 +150,7 @@ def choose_types(description, lore_text="", proposed=(), counts=None, dual=False
     first = choose_type(description, lore_text, proposed, counts)
     if not dual:
         return first
-    return first + " et " + choose_type(description, lore_text, proposed, counts, exclude=(first,))
+    return first + " et " + choose_type(description, lore_text, proposed, counts, exclude=(first, OPPOSED.get(first)))
 
 
 TOP = (50, 22, 8, 2)  # % du haut du classement : peu commun et mieux, rare et mieux, épique et mieux, légendaire
@@ -198,12 +213,11 @@ def stats(key, rare, typ, posture="", poids=None, taille=None):
 
 
 def weaknesses(typ):
-    """Double type : les faiblesses et résistances des deux ; une faiblesse de l'un que l'autre résiste s'annule."""
-    weak, strong = [], []
-    for t in split(typ):
-        weak += [e for e in CHART[t][0] if e not in weak]
-        strong += [e for e in CHART[t][1] if e not in strong]
-    return dict(faiblesses=[e for e in weak if e not in strong], resistances=[e for e in strong if e not in weak])
+    """Faiblesses (×2, ×4), résistances (×½, ×¼), immunités (×0) et tous les multiplicateurs différents de 1."""
+    m = {e: mult(e, typ) for e in EFF}
+    by = lambda keep, rev: sorted((e for e in EFF if keep(m[e])), key=lambda e: -m[e] if rev else m[e])
+    return dict(faiblesses=by(lambda v: v > 1, True), resistances=by(lambda v: 0 < v < 1, False), immunites=by(lambda v: v == 0, False),
+                multiplicateurs={e: v for e, v in m.items() if v != 1})
 
 
 def portee(genre):
@@ -329,13 +343,20 @@ if __name__ == "__main__":
     assert choose_type("une chose", counts=lib) not in lib
     assert choose_type("un dragon de lave", proposed=["ombre"], counts=lib) == "feu"  # le texte prime
     d = card("oiseau", dict(type="vent et foudre", prestige=50, attaques=written[:2]))
-    assert d["faiblesses"] == ["foudre", "roche"] and set(d["resistances"]) == {"plante", "vent", "acier"}, d
-    assert weaknesses("feu et eau") == dict(faiblesses=["eau", "roche", "foudre"], resistances=["glace", "feu", "acier"]), weaknesses("feu et eau")  # plante : faiblesse de l'eau, résistée par le feu : s'annule
+    assert d["multiplicateurs"]["roche"] == 4 and d["faiblesses"][0] == "roche", d  # vent et foudre : la roche ×4
+    w = weaknesses("roche et eau")
+    assert w["immunites"] == ["foudre"] and w["multiplicateurs"]["plante"] == 4, w  # la roche ne craint pas la foudre, même mouillée
+    w = weaknesses("plante et glace")
+    assert w["multiplicateurs"]["feu"] == 4 and w["faiblesses"][0] == "feu", w  # double faiblesse : ×4
+    w = weaknesses("feu et eau")
+    assert w["multiplicateurs"]["feu"] == .25 and "plante" not in w["multiplicateurs"], w  # ×¼ ; plante : ×2 et ×½ -> ×1
+    assert mult("poison", "acier") == 0 and mult("feu", "plante") == 2 and mult("eau", "eau") == .5
     assert [a["element"] for a in d["attaques"]][:2] == ["vent", "foudre"], d["attaques"]
     e = card("goule", dict(type="ombre et acier", prestige=50, attaques=[dict(nom="A", genre="morsure", element="ombre"), dict(nom="B", genre="cri", element="ombre")]))
     assert [a["element"] for a in e["attaques"]] == ["ombre", "acier"], e["attaques"]  # la plume n'a écrit que de l'ombre
-    assert weaknesses("feu") == dict(faiblesses=["eau", "roche"], resistances=["plante", "glace"])
+    assert weaknesses("feu")["faiblesses"] == ["eau", "roche"] and set(weaknesses("feu")["resistances"]) == {"feu", "plante", "glace", "acier", "lumière"}
     two = choose_types("un oiseau d'orage aux plumes qui crépitent d'éclairs", proposed=["vent", "foudre"], counts=lib, dual=True)
     assert set(split(two)) == {"vent", "foudre"} and " et " in two, two
+    assert "lumière" not in choose_types("une ombre de la nuit noire, un démon solaire doré radieux", proposed=["ombre", "lumière"], dual=True)  # NeoMe seul
     assert split("ombre et lumière") == ["ombre", "lumière"] and split("") == []
     print("ok", dict(c), dict(tiers), k["rarete"], genres)

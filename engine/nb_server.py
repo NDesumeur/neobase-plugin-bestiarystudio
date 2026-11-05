@@ -134,14 +134,41 @@ class Studio:
     def upgrade_types(self):
         """Une fois : les créatures d'avant les doubles types passent à une sur deux avec deux types."""
         cfg = self.lib.load_config({})
-        if cfg.get("types", 1) >= 2:
+        if cfg.get("types", 1) >= 3:
             return []
-        done = self.retype()
-        cfg["types"] = 2
+        done = self.retype() if cfg.get("types", 1) < 2 else []
+        n = self.recard()
+        cfg["types"] = 3
         self.lib.save_config(cfg)
-        if done:
-            print(f"{len(done)} créature(s) : un 2e type")
+        if done or n:
+            print(f"{len(done)} créature(s) : un 2e type ; {n} fiche(s) : table des types")
         return done
+
+    def recard(self):
+        """Table des types façon Pokémon : chaque fiche reçoit ses multiplicateurs (×4 à ×0), même rareté ;
+        « ombre et lumière » reste à NeoMe seul (les autres changent de 2e type)."""
+        n = 0
+        for r in self.lib.list():
+            lore = r.get("lore") or {}
+            t = nb_stats.split(lore.get("type"))
+            if not t or not lore.get("combat"):
+                continue
+            if r.get("rarete_fixe") == nb_stats.UNIQUE:  # fiche écrite à la main : seulement les multiplicateurs
+                lore["combat"].update(nb_stats.weaknesses(lore["type"]))
+            else:
+                if len(t) == 2 and nb_stats.OPPOSED.get(t[0]) == t[1]:
+                    text = " ".join(str(lore.get(k, "")) for k in ("espece", "habitat", "description", "histoire"))
+                    lore["type"] = t[0] + " et " + nb_stats.choose_type(r.get("description", ""), text, lore.get("types_proposes", []), {}, exclude=tuple(t))
+                fixed = r.get("rarete_fixe")
+                r["rarete_fixe"] = lore["combat"]["rarete"]  # même rareté qu'avant
+                new = self._card(r)
+                new["rarete_fixe"], r["rarete_fixe"] = bool(fixed), fixed
+                lore["combat"] = new
+            self.lib.save(r)
+            if (self.lib.sprites_dir(r["slug"]) / "bas_repos.png").is_file():
+                self.build_attacks(r["slug"])
+            n += 1
+        return n
 
     EFFECTS = 2  # 2 : les visuels signés (nb_attack_sig), un par attaque
 
@@ -586,6 +613,8 @@ class Studio:
             return lore
         rnd = random.Random(rec["slug"])
         firsts = list(dict.fromkeys(nb_stats.split(p.get("type"))[0] for p in parents if nb_stats.split(p.get("type"))))
+        if len(firsts) == 2 and nb_stats.OPPOSED.get(firsts[0]) == firsts[1]:
+            firsts = firsts[:1]  # « ombre et lumière » : NeoMe seul
         if firsts:  # le 1er type de chaque parent : deux parents de types différents -> un double type
             lore["type"] = " et ".join(firsts)
         moves = [(p.get("attaques") or []) for p in parents]
