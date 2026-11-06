@@ -146,6 +146,12 @@ def choose_type(description, lore_text="", proposed=(), counts=None, exclude=())
     return max(near, key=lambda t: (score[t] - 6 * share[t], -share[t]))
 
 
+def target_type(counts, rnd=random):
+    """Le type visé avant d'inventer une créature : tiré au sort, d'autant plus probable qu'il manque au bestiaire."""
+    types = sorted(CHART)
+    return rnd.choices(types, [1 / (1 + (counts or {}).get(t, 0)) for t in types])[0]
+
+
 def choose_types(description, lore_text="", proposed=(), counts=None, dual=False):
     """Un type, ou deux (« feu et vent ») : le 2e est le meilleur des autres, choisi de la même façon."""
     first = choose_type(description, lore_text, proposed, counts)
@@ -271,6 +277,34 @@ def pick_moves(written, count, typ, anatomy=()):
     return chosen
 
 
+CAP = 2  # une créature peut avoir des attaques jusqu'à 2 crans au-dessus de sa rareté (commune : jusqu'à rare)
+
+
+def cap(rare):
+    """La rareté d'attaque la plus haute permise à une créature de cette rareté."""
+    return nb_moves.RARETES[min(4, RARITIES.index(rare) + CAP)] if rare in RARITIES else nb_moves.RARETES[-1]
+
+
+def too_rare(elem, genre, rare):
+    tech = nb_moves.get(elem, genre)
+    return bool(tech) and nb_moves.RARETES.index(tech["rarete"]) > nb_moves.RARETES.index(cap(rare))
+
+
+def move(key, i, rare, count, elem, genre, nom=None, description=""):
+    """L'attaque n° i de la fiche : la mécanique du catalogue (statut, baisses de stats, précision…) et sa puissance."""
+    tech = nb_moves.get(elem, genre)
+    power = attack_power(key, i, rare, genre, count)
+    m = dict(nom=nom or tech["nom"], genre=genre, element=elem, description=description,
+             puissance=round(power * tech["force"]), portee=portee(genre), technique=tech["nom"], id=tech["id"])
+    m.update({k: v for k, v in tech.items() if k not in ("id", "nom", "element", "genre", "force")})
+    m["effet_texte"] = nb_moves.describe(tech)
+    if genre == "soin":
+        m["effet"] = dict(soin=tech["soin"])  # % des PV max (anciennes versions de l'Arène)
+    elif genre == "renfort":
+        m["effet"] = dict(attaque=30)  # % d'attaque en plus (anciennes versions de l'Arène)
+    return m
+
+
 def card(key, fiche, posture="", fixed=None, others=(), anatomy=()):
     """Le bloc « combat » de la fiche à partir de ce que la plume a écrit (type, poids, prestige, attaques)."""
     typ = fiche.get("type") if split(fiche.get("type")) else "esprit"
@@ -285,21 +319,18 @@ def card(key, fiche, posture="", fixed=None, others=(), anatomy=()):
     elems = [a.get("element") if a.get("element") in CHART else types[i % len(types)] for i, a in enumerate(picked)]
     if len(types) == 2 and types[1] not in elems and len(elems) > 1:  # double type : au moins une attaque du 2e
         elems[next((i for i in range(1, len(elems)) if picked[i]["genre"] not in SUPPORT), 1)] = types[1]
-    moves = []
-    for i, a in enumerate(picked):
-        genre = a["genre"]
-        elem = elems[i]
-        tech = nb_moves.get(elem, genre)  # la mécanique : statut, baisses de stats, précision, coups multiples…
-        power = attack_power(key, i, rare, genre, len(picked))
-        m = dict(nom=a.get("nom") or tech["nom"], genre=genre, element=elem, description=a.get("description", ""),
-                 puissance=round(power * tech["force"]), portee=portee(genre), technique=tech["nom"], id=tech["id"])
-        m.update({k: v for k, v in tech.items() if k not in ("id", "nom", "element", "genre", "force")})
-        m["effet_texte"] = nb_moves.describe(tech)
-        if genre == "soin":
-            m["effet"] = dict(soin=tech["soin"])  # % des PV max (anciennes versions de l'Arène)
-        elif genre == "renfort":
-            m["effet"] = dict(attaque=30)  # % d'attaque en plus (anciennes versions de l'Arène)
-        moves.append(m)
+    used = {a["genre"] for a in picked}
+    for i, a in enumerate(picked):  # trop rare pour la créature : un autre geste du même élément, de même portée si possible
+        if too_rare(elems[i], a["genre"], rare):
+            pool = [g for g in nb_moves.GENRES if g not in used and (g in SUPPORT) == (a["genre"] in SUPPORT)
+                    and not too_rare(elems[i], g, rare)]
+            g = min(pool, key=lambda g: (portee(g) != portee(a["genre"]), nb_moves.GENRES.index(g)), default=None)
+            if g:
+                used.discard(a["genre"])
+                used.add(g)
+                a["genre"], a["nom"] = g, ""  # le nom écrit allait avec l'ancien geste : celui du catalogue
+    moves = [move(key, i, rare, len(picked), elems[i], a["genre"], a.get("nom"), a.get("description", ""))
+             for i, a in enumerate(picked)]
     return dict(rarete=rare, rarete_fixe=fixed in RARITIES, prestige=prestige,
                 stats=stats(key, rare, typ, posture, fiche.get("poids"), fiche.get("taille")),
                 attaques=moves, **weaknesses(typ))
@@ -334,10 +365,17 @@ if __name__ == "__main__":
         kinds = {portee(m["genre"]) for m in ms}
         assert kinds & {"distance", "zone"} and "contact" in kinds, ms
     assert len(pick_moves([], 2, "eau")) == 2
+    for i in range(300):  # jamais d'attaque à plus de 2 crans de la créature
+        kc = card(f"c{i}", dict(type=random.Random(i).choice(sorted(CHART)), prestige=10,
+                                attaques=[dict(nom="A", genre="explosion"), dict(nom="B", genre="projectile"), dict(nom="C", genre="charge")]))
+        assert all(nb_moves.RARETES.index(a["rarete"]) <= RARITIES.index(kc["rarete"]) + CAP for a in kc["attaques"]), kc
+    assert cap("commun") == "rare" and cap("épique") == "légendaire"
     gel = card("yeti", dict(type="glace", prestige=50, attaques=[dict(nom="Coup", genre="griffe"), dict(nom="Givre", genre="souffle")]))["attaques"]
     assert any(a.get("statut", {}).get("nom") == "gel" for a in gel) and gel[1]["precision"] == 90, gel
     assert card("x", dict(type="eau", attaques=[]))["attaques"][0]["nom"] in [m["nom"] for m in nb_moves.CATALOG.values()]
     lib = dict(ombre=24, esprit=21, eau=19, plante=15, feu=10, poison=4, roche=2)
+    drawn = Counter(target_type(dict(ombre=120, glace=1), random.Random(i)) for i in range(2000))
+    assert drawn["glace"] > 5 * drawn["ombre"] and len(drawn) == len(CHART), drawn  # les types rares sont visés
     assert choose_type("un golem de pierre et de cristal", proposed=["esprit"], counts=lib) == "roche"
     assert choose_type("une créature étrange", proposed=["ombre", "glace"], counts=lib) == "glace"
     assert choose_type("un oiseau d'orage aux plumes qui crépitent d'éclairs", proposed=["vent", "foudre"], counts=lib) in ("vent", "foudre")

@@ -141,6 +141,36 @@ CATALOG = {(e, g): dict(id=f"{e}:{g}", nom=NAMES[e][i], element=e, genre=g, **_b
            for e in ELEMENTS for i, g in enumerate(GENRES)}
 
 
+RARETES = ("commun", "peu commun", "rare", "épique", "légendaire")  # « ??? » : les attaques signature de NeoMe, à lui seul
+SHARE = (.50, .28, .14, .06, .02)  # comme les créatures : la moitié communes, 2 % légendaires
+
+
+def value(m):
+    """Ce que vaut une attaque : ses dégâts attendus et tout ce qu'elle fait en plus (statut, stats, priorité, soin…)."""
+    if m["genre"] in ("soin", "renfort"):  # sans dégâts : le soin et les crans gagnés font la valeur
+        return 50 + m.get("soin", 0) + 15 * m.get("purge", 0) + .2 * sum(e["chance"] * e["niveaux"] for e in m.get("effets") or [])
+    hits = sum(m["coups"]) / 2 if m.get("coups") else 1
+    v = 100 * m.get("force", 1) * hits + 10 * m.get("priorite", 0) + .3 * m.get("drain", 0) + 2 * m.get("critique", 0)
+    v -= .2 * m.get("recul", 0) + .3 * (100 - m.get("precision", 100))
+    if m.get("statut"):
+        v += .5 * m["statut"]["chance"]
+    for e in m.get("effets") or []:  # un cran baissé chez l'ennemi ou gagné chez soi : un plus ; perdu chez soi : un moins
+        v += .1 * e["chance"] * abs(e["niveaux"]) * (1 if (e["cible"] == "soi") == (e["niveaux"] > 0) else -1)
+    return v
+
+
+def _rarities():
+    ranked = sorted(CATALOG.values(), key=lambda m: (value(m), m["id"]))
+    for i, m in enumerate(ranked):
+        top, k = 1 - i / len(ranked), 0
+        while k < 4 and top <= sum(SHARE[k + 1:]):
+            k += 1
+        m["rarete"] = RARETES[k]
+
+
+_rarities()
+
+
 def get(element, genre):
     return CATALOG.get((element, genre))
 
@@ -178,7 +208,12 @@ if __name__ == "__main__":
     assert len(CATALOG) == 204 and len(set(names)) == 204, [n for n in names if names.count(n) > 1]
     assert all(len(NAMES[e]) == len(GENRES) for e in ELEMENTS)
     assert all(describe(m) or m["genre"] in ("charge",) for m in CATALOG.values())
-    kinds = {k for m in CATALOG.values() for k in m} - {"id", "nom", "element", "genre", "force"}
+    from collections import Counter
+    r = Counter(m["rarete"] for m in CATALOG.values())
+    assert r["commun"] > 90 and 2 <= r["légendaire"] <= 6 and len(r) == 5, r
+    assert get("feu", "explosion")["rarete"] != "commun" and get("eau", "pluie")["rarete"] in ("commun", "peu commun")
+    print(r, [m["nom"] for m in CATALOG.values() if m["rarete"] == "légendaire"])
+    kinds = {k for m in CATALOG.values() for k in m} - {"id", "nom", "element", "genre", "force", "rarete"}
     print("ok", len(CATALOG), "attaques ;", sorted(kinds))
     for k in (("glace", "souffle"), ("feu", "renfort"), ("eau", "soin"), ("vent", "rafale")):
         print(CATALOG[k]["nom"], "-", describe(CATALOG[k]))

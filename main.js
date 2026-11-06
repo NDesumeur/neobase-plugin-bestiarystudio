@@ -14,7 +14,8 @@ const GUESSES = [  // où ComfyUI portable est souvent posé
   path.join(app.getPath('home'), 'ComfyUI_windows_portable'), path.join(app.getPath('desktop'), 'ComfyUI_windows_portable'),
 ];
 const isComfy = d => !!d && fs.existsSync(path.join(d, 'python_embeded', 'python.exe')) && fs.existsSync(path.join(d, 'ComfyUI', 'main.py'));
-const TYPES = { '.css': 'text/css; charset=utf-8', '.woff': 'font/woff', '.png': 'image/png', '.json': 'application/json' };
+const TYPES = { '.css': 'text/css; charset=utf-8', '.woff': 'font/woff', '.png': 'image/png', '.json': 'application/json', '.mp3': 'audio/mpeg' };
+const MADE = new Set(['objets', 'attaques', 'musiques']);  // les autres créations : neoplugin://…/mk/<dossier>/<slug>/<fichier>
 const inside = (base, rel) => { const p = path.resolve(base, rel); return p.startsWith(path.resolve(base) + path.sep) ? p : null; };  // jamais en dehors du dossier
 
 module.exports = ({ ipcMain, protocol, serveFile, readDoc, writeDoc }) => {
@@ -83,10 +84,11 @@ module.exports = ({ ipcMain, protocol, serveFile, readDoc, writeDoc }) => {
     return call('POST', '/export', { slug, dest: r.filePaths[0] });
   });
 
-  // neoplugin://neodex.bestiarystudio/ui/<fichier> | lib/<créature>/<chemin>
+  // neoplugin://neodex.bestiarystudio/ui/<fichier> | lib/<créature>/<chemin> | mk/<objets|attaques|musiques>/<slug>/<fichier>
   protocol(async req => {
     const u = new URL(req.url), [, kind, ...rest] = u.pathname.split('/'), rel = decodeURIComponent(rest.join('/'));
-    const file = kind === 'ui' ? inside(UI, rel) : kind === 'lib' ? inside(path.join(LIBRARY(), 'creatures'), rel) : null;
+    const file = kind === 'ui' ? inside(UI, rel) : kind === 'lib' ? inside(path.join(LIBRARY(), 'creatures'), rel)
+      : kind === 'mk' && MADE.has(rel.split('/')[0]) ? inside(LIBRARY(), rel) : null;
     if (!file || !fs.existsSync(file)) return new Response('', { status: 404 });
     return serveFile(file, req, TYPES[path.extname(file).toLowerCase()]);
   });

@@ -31,6 +31,8 @@ import nb_anim  # noqa: E402
 import nb_variant  # noqa: E402
 import nb_stats  # noqa: E402
 import nb_sprite as sp  # noqa: E402
+import nb_make  # noqa: E402
+import nb_moves  # noqa: E402
 
 DIRS = ("bas", "gauche", "droite", "haut")
 FRAMES = ("pas1", "repos", "pas2", "mi1", "mi2")  # colonnes de la planche (repos reste en 2e colonne)
@@ -54,6 +56,14 @@ def png_bytes(im):
 
 # --------------------------------------------------------------------------- tâches
 
+JOB_NAMES = {"make-objet": "un objet", "make-attaque": "une attaque", "make-musique": "une musique"}
+
+
+def busy_text(kind):
+    """Une seule création à la fois (créature, objet, attaque ou musique) : le GPU n'en fait qu'une."""
+    return f"Une création est déjà en cours ({JOB_NAMES.get(kind, 'une créature')}) : attends qu'elle finisse ou arrête-la."
+
+
 class Jobs:
     """Une tâche à la fois (le GPU ne fait qu'une image à la fois de toute façon)."""
 
@@ -65,7 +75,7 @@ class Jobs:
     def start(self, kind, fn, total=1, slug=""):
         with self.lock:
             if self.state["running"]:
-                raise RuntimeError("Une tâche est déjà en cours.")
+                raise RuntimeError(busy_text(self.state["kind"]))
             self._cancel = False
             self.state = dict(id=self.state["id"] + 1, kind=kind, running=True, step="Préparation", progress=0.0,
                               error="", slug=slug, done=False, total=total, count=0)
@@ -155,6 +165,7 @@ class Studio:
         self.comfy_root = Path(comfy_root) if comfy_root else None
         self.manager = nbc.ComfyManager(comfy_url, self.comfy_root or ".", log=print)
         self.jobs = Jobs()
+        self.install = dict(running=False, step="", progress=0.0, error="", at=0)
         self.fake = fake
         if fake:
             import nb_engine_fake as eng
@@ -166,6 +177,7 @@ class Studio:
         self.upgrade_cards()
         self.upgrade_effects()
         self.upgrade_types()
+        self.upgrade_cap()
         self.upgrade_float()
 
     def upgrade_float(self):
@@ -255,6 +267,29 @@ class Studio:
             print(f"{done} créature(s) : effets d'attaque redessinés")
         return done
 
+    def upgrade_cap(self):
+        """Une fois : les fiches d'avant le plafond perdent leurs attaques à plus de 2 crans au-dessus de leur rareté."""
+        cfg = self.lib.load_config({})
+        if cfg.get("plafond"):
+            return 0
+        done = 0
+        for rec in self.lib.list():
+            card = (rec.get("lore") or {}).get("combat")
+            if not card or rec.get("rarete_fixe") == nb_stats.UNIQUE:
+                continue
+            if not any(nb_stats.too_rare(a.get("element"), a.get("genre"), card["rarete"]) for a in card.get("attaques", [])):
+                continue
+            self._same_rarity(rec)
+            self.lib.save(rec)
+            if (self.lib.sprites_dir(rec["slug"]) / "bas_repos.png").is_file():
+                self.build_attacks(rec["slug"])
+            done += 1
+        cfg["plafond"] = nb_stats.CAP
+        self.lib.save_config(cfg)
+        if done:
+            print(f"{done} créature(s) : attaques trop rares remplacées")
+        return done
+
     def upgrade_cards(self):
         """Les fiches d'avant le catalogue des 204 attaques reçoivent leur mécanique (mêmes gestes, mêmes noms)."""
         done = 0
@@ -290,26 +325,137 @@ class Studio:
         import install_models
         up = self.manager.client.is_up()
         found = bool(self.comfy_root and (self.comfy_root / "ComfyUI" / "main.py").is_file())
-        missing = [dict(name=n, gb=gb) for _f, n, _r, gb in install_models.missing(self.comfy_root)] if found else []
-        return dict(comfy="prêt" if up else ("arrêté" if found else "introuvable"), comfy_root=found,
-                    missing=missing, model="FLUX.2 klein", writer=self.writer.model())
+        need = lambda which: [dict(name=n, gb=gb) for _f, n, _r, gb in install_models.missing(self.comfy_root, which)] if found else []
+        missing, music = need(install_models.REQUIRED), need(("musique",))
+        if (missing or music) and not self.install["running"] and time.time() - self.install["at"] > 120:
+            self.install_models()  # au lancement du Studio : tout ce qui manque se télécharge tout seul
+        return dict(comfy="prêt" if up else ("arrêté" if found else "introuvable"), comfy_root=found, missing=missing,
+                    missing_music=music, install=dict(self.install), model="FLUX.2 klein", writer=self.writer.model())
 
     def install_models(self):
+        """Télécharge en arrière-plan les modèles absents : ceux du dessin d'abord, puis la musique. Ne bloque pas les créations."""
         import install_models
+        if not self.comfy_root or self.install["running"]:
+            return dict(self.install)
+        todo = install_models.missing(self.comfy_root, install_models.REQUIRED + ("musique",))
+        if not todo:
+            return dict(self.install)
+        models = self.comfy_root / "ComfyUI" / "models"
+        gb = sum(t[3] for t in todo)
+        self.install.update(running=True, step="Préparation", progress=0.0, error="", at=time.time())
+
+        def run():
+            try:
+                if shutil.disk_usage(models).free < gb * 1.05 * 2 ** 30:
+                    raise RuntimeError(f"Pas assez de place sur le disque : il faut {gb:.1f} Go libres pour les modèles.")
+                done = 0.0
+                for folder, name, repo, size in todo:
+                    dest = models / folder / name
+                    dest.parent.mkdir(parents=True, exist_ok=True)
+                    url = install_models.HF.format(repo, f"{install_models.PREFIX.get(repo, 'split_files/')}{folder}/{name}")
+
+                    def on(n, total, base=done, size=size, name=name):
+                        self.install.update(step=f"{name} · {n >> 20} / {total >> 20} Mo",
+                                            progress=min(.99, (base + size * n / max(1, total)) / gb))
+                    install_models.download(url, dest, name, on)
+                    done += size
+                self.install.update(step="Modèles installés", progress=1.0)
+            except Exception as exc:
+                traceback.print_exc()
+                self.install["error"] = f"Installation des modèles interrompue : {exc}"
+            finally:
+                self.install.update(running=False, at=time.time())
+        threading.Thread(target=run, daemon=True).start()
+        return dict(self.install)
+
+    # ---------------------------------------------------- objets, attaques, musiques
+    def _favs(self):
+        f = self.lib.root / "favoris.json"
+        try:
+            return set(json.loads(f.read_text(encoding="utf-8")))
+        except Exception:
+            return set()
+
+    def favorite(self, kind, slug, on):
+        favs = self._favs()
+        (favs.add if on else favs.discard)(f"{kind}:{slug}")
+        (self.lib.root / "favoris.json").write_text(json.dumps(sorted(favs), ensure_ascii=False), encoding="utf-8")
+        return dict(ok=True, fav=bool(on))
+
+    def items(self, kind):
+        favs = self._favs()
+        if kind == "creature":
+            out = self.library()
+        else:
+            out = nb_make.items(self.lib.root, kind)
+            if kind == "attaque":
+                cat = nb_make.catalog_thumbs(self.lib.root)
+                out += nb_make.catalog() + self._signatures(cat)
+        for it in out:
+            it["fav"] = f"{kind}:{it['slug']}" in favs
+        return out
+
+    def _signatures(self, cat):
+        """Les attaques signature (NeoMe) rejoignent la bibliothèque d'attaques : vignette tirée de leur planche, faite une fois."""
+        out = []
+        for rec in self.lib.list():
+            for a in ((rec.get("lore") or {}).get("combat") or {}).get("attaques", []):
+                sheet = self.lib.dir(rec["slug"]) / "signature" / f"{a.get('visuel')}.png"
+                if not sheet.is_file():
+                    continue
+                name = f"{rec['slug']}_{a['visuel']}"
+                if not (cat / f"{name}.png").is_file():
+                    nb_make.thumb_from(Image.open(sheet).convert("RGBA"), a.get("genre")).save(cat / f"{name}.png")
+                out.append(dict(a, slug=f"_catalogue/{name}", kind="attaque", source="signature", visuel=a["visuel"], rarete=nb_stats.UNIQUE,
+                                creature=rec["slug"], mecanique=nb_moves.describe(a)))
+        return out
+
+    def make(self, b):
+        """Objet, attaque ou musique : une tâche comme une créature (une seule création à la fois)."""
+        import install_models
+        kind = b.get("kind")
+        nom, desc = (b.get("nom") or "").strip()[:60], (b.get("description") or "").strip()
+        if kind not in nb_make.FOLDER:
+            raise ValueError("Création inconnue.")
+        if not desc:
+            raise ValueError("Décris ce que tu veux créer.")
+        if self.fake:
+            raise RuntimeError("Pas de création en mode factice.")
+        if kind == "musique" and self.comfy_root and install_models.missing(self.comfy_root, ("musique",)):
+            i = self.install
+            raise RuntimeError(f"Le modèle de musique s'installe encore ({round(i['progress'] * 100)} %)." if i["running"]
+                               else (i["error"] or "Le modèle de musique n'est pas installé."))
+        seed = int(b["seed"]) if b.get("seed") not in (None, "") else int(time.time()) % 1000000
+        rec = dict(nom=nom or desc.split(",")[0][:40], description=desc)
+        if kind == "objet":
+            rec.update(categorie=b.get("categorie") or "objet du quotidien", rarete=b.get("rarete") or "commun")
+        elif kind == "attaque":
+            rec.update(element=b.get("element") or "feu", genre=b.get("genre") or "projectile")
+        else:
+            rec.update(paroles=(b.get("paroles") or "")[:3000], duree=int(b.get("duree") or 60), tempo=b.get("tempo") or "moyen",
+                       ambiance=b.get("ambiance") or "joyeuse")
 
         def run(progress, cancel):
-            for folder, name, repo, gb in install_models.missing(self.comfy_root):
-                if cancel():
-                    raise RuntimeError("annulé")
-                progress(f"Téléchargement de {name} ({gb} Go)")
-                dest = self.comfy_root / "ComfyUI" / "models" / folder / name
-                dest.parent.mkdir(parents=True, exist_ok=True)
-                url = install_models.HF.format(repo, f"{install_models.PREFIX.get(repo, 'split_files/')}{folder}/{name}")
-                install_models.download(url, dest, name)
-        total = len(install_models.missing(self.comfy_root)) if self.comfy_root else 0
-        if not total:
-            raise RuntimeError("Rien à installer.")
-        return self.jobs.start("install", run, total)
+            c = self.client()
+            if kind == "objet":
+                return nb_make.make_object(self.eng, c, self.lib.root, rec, seed, progress, cancel)
+            if kind == "attaque":
+                return nb_make.make_attack(self.eng, c, self.lib.root, rec, seed, progress, cancel)
+            return nb_make.make_music(c, self.lib.root, rec, seed, progress, cancel)
+        return self.jobs.start("make-" + kind, run, dict(objet=3, attaque=3, musique=1)[kind])
+
+    def item(self, kind, slug):
+        favs = self._favs()
+        return dict(nb_make.load(self.lib.root, kind, slug), slug=slug, kind=kind, fav=f"{kind}:{slug}" in favs)
+
+    def item_delete(self, kind, slug):
+        src = nb_make.folder(self.lib.root, kind) / slug
+        if slug.startswith("_") or not (src / "item.json").is_file():
+            raise ValueError("Création introuvable.")
+        trash = self.lib.root / "corbeille"
+        trash.mkdir(exist_ok=True)
+        shutil.move(str(src), str(trash / f"{kind}_{slug}_{int(time.time())}"))
+        return dict(ok=True)
 
     # ------------------------------------------------------------ créatures
     def _unique_slug(self, name):
@@ -319,16 +465,18 @@ class Studio:
             slug, n = f"{base}_{n}", n + 1
         return slug
 
-    def create(self, name, description, seed=None):
+    def create(self, name, description, seed=None, typ=None):
         name = (name or "").strip() or "Créature"
         description = (description or "").strip()
         if not description:
             raise ValueError("Décris ta créature.")
         if self.jobs.get()["running"]:
-            raise RuntimeError("Une tâche est déjà en cours.")
+            raise RuntimeError(busy_text(self.jobs.get()["kind"]))
         seed = int(seed) if seed not in (None, "") else int(time.time()) % 1000000
         rec = self.lib.new_record(name)
         rec.update(slug=self._unique_slug(name), description=description, seed=seed, lab=dict(LAB_DEFAULTS))
+        if typ in nb_stats.CHART:
+            rec["type_voulu"] = typ
         self.lib.save(rec)
         slug = rec["slug"]
 
@@ -345,7 +493,7 @@ class Studio:
         """Invocation en boucle : une idée au hasard, ses esquisses, la meilleure (vérifiée) choisie toute seule, toute la
         créature, puis la suivante, jusqu'à /auto-stop (qui laisse finir la créature en cours) ou /cancel (tout de suite)."""
         if self.jobs.get()["running"]:
-            raise RuntimeError("Une tâche est déjà en cours.")
+            raise RuntimeError(busy_text(self.jobs.get()["kind"]))
         self.auto_stop = False
 
         def run(progress, cancel):
@@ -369,11 +517,12 @@ class Studio:
     def _auto_one(self, progress, cancel, n):
         progress(f"Créature {n} : idée")
         self._free_gpu()  # la plume a besoin de la carte
-        idea = self.writer.idea(random.choice([t for t in self.writer.THEMES if t != "melange"] + ["melange"]))
+        typ = nb_stats.target_type(self._type_counts())  # le type d'abord (les rares d'abord), la créature autour
+        idea = self.writer.idea(random.choice([t for t in self.writer.THEMES if t != "melange"] + ["melange"]), typ=typ)
         seed = random.randrange(10 ** 6)
         rec = self.lib.new_record(idea["name"] or "Créature")
         rec.update(slug=self._unique_slug(idea["name"] or "Créature"), description=idea["description"], seed=seed,
-                   lab=dict(LAB_DEFAULTS), auto=True)
+                   lab=dict(LAB_DEFAULTS), auto=True, type_voulu=typ)
         self.lib.save(rec)
         slug = rec["slug"]
         self.jobs.restart(self.jobs.get()["total"], slug=slug)
@@ -570,7 +719,7 @@ class Studio:
         if self.lib.load(slug) is None:
             raise ValueError("Créature introuvable.")
         if self.jobs.get()["running"]:
-            raise RuntimeError("Une tâche est déjà en cours.")
+            raise RuntimeError(busy_text(self.jobs.get()["kind"]))
         return self.jobs.start("illustration", lambda progress, cancel: (
             self._illustration(self.client(), slug, progress, cancel), slug)[1], self.ILLUSTRATIONS + 1, slug)
 
@@ -578,7 +727,7 @@ class Studio:
         if self.lib.load(slug) is None:
             raise ValueError("Créature introuvable.")
         if self.jobs.get()["running"]:
-            raise RuntimeError("Une tâche est déjà en cours.")
+            raise RuntimeError(busy_text(self.jobs.get()["kind"]))
         return self.jobs.start("portrait", lambda progress, cancel: (self._portrait(self.client(), slug, progress, cancel),
                                                                      slug)[1], 1, slug)
 
@@ -603,7 +752,7 @@ class Studio:
         if da is None or db is None or not ra.get("views", {}).get("haut") or not rb.get("views", {}).get("haut"):
             raise ValueError("Les deux créatures doivent être finies.")
         if self.jobs.get()["running"]:
-            raise RuntimeError("Une tâche est déjà en cours.")
+            raise RuntimeError(busy_text(self.jobs.get()["kind"]))
         seed = int(seed) if seed not in (None, "") else int(time.time()) % 1000000
         name = ra["name"][:max(2, len(ra["name"]) // 2)] + rb["name"][len(rb["name"]) // 2:]
         rec = self.lib.new_record(name)
@@ -632,20 +781,91 @@ class Studio:
             return slug
         return self.jobs.start("sketch", run, SKETCHES + 3, slug), slug
 
-    def _pick_type(self, rec, lore):
-        """Le type : ce que la plume propose, les mots de la description, et les types qui manquent au bestiaire.
-        Une créature sur deux a deux types (« feu et vent ») : un double type quand le bestiaire en a moins que de simples."""
-        counts, n = {}, [0, 0]
+    def _type_counts(self, but=None, n=None):
+        """Combien de créatures de chaque type (n : [simples, doubles], rempli au passage)."""
+        counts, n = {}, n if n is not None else [0, 0]
         for r in self.lib.list():
             t = nb_stats.split((r.get("lore") or {}).get("type"))
-            if t and r.get("slug") != rec["slug"] and r.get("rarete_fixe") != nb_stats.UNIQUE:
+            if t and r.get("slug") != but and r.get("rarete_fixe") != nb_stats.UNIQUE:
                 n[len(t) - 1] += 1
                 for x in t:
                     counts[x] = counts.get(x, 0) + 1
+        return counts
+
+    def _pick_type(self, rec, lore):
+        """Le type : celui visé avant la création (ou choisi à la main), sinon ce que la plume propose, les mots de la
+        description, et les types qui manquent au bestiaire. Une créature sur deux a deux types (« feu et vent ») :
+        un double type quand le bestiaire en a moins que de simples."""
+        n = [0, 0]
+        counts = self._type_counts(rec["slug"], n)
         dual = n[1] < n[0] or (n[1] == n[0] and random.Random("types:" + rec["slug"]).random() < .5)
         text = " ".join(str(lore.get(k, "")) for k in ("espece", "habitat", "description", "histoire"))
+        want = nb_stats.split(rec.get("type_voulu"))
+        if len(want) == 2 or (want and rec.get("types_main")):  # choisi à la main : tel quel
+            return rec["type_voulu"]
+        if want:
+            if not dual:
+                return want[0]
+            return want[0] + " et " + nb_stats.choose_type(rec.get("description", ""), text, lore.get("types_proposes", []),
+                                                           counts, exclude=(want[0], nb_stats.OPPOSED.get(want[0])))
         return nb_stats.choose_types(rec.get("description", ""), text, lore.get("types_proposes", [lore.get("type")]),
                                      counts, dual)
+
+    def _same_rarity(self, rec):
+        """La fiche de combat recalculée (types, attaques) sans changer la rareté."""
+        fixed = rec.get("rarete_fixe")
+        rec["rarete_fixe"] = fixed or rec["lore"]["combat"]["rarete"]
+        new = self._card(rec)
+        new["rarete_fixe"], rec["rarete_fixe"] = bool(fixed), fixed
+        rec["lore"]["combat"] = new
+
+    def set_types(self, slug, types):
+        """Un ou deux types choisis à la main : faiblesses et éléments des attaques suivent, la rareté reste."""
+        rec = self.lib.load(slug)
+        types = [t for t in (types or []) if t]
+        if rec is None or not (rec.get("lore") or {}).get("type"):
+            raise ValueError("Pas encore de fiche.")
+        if not 1 <= len(types) <= 2 or len(set(types)) != len(types) or any(t not in nb_stats.CHART for t in types):
+            raise ValueError("Choisis un ou deux types différents.")
+        typ = " et ".join(types)
+        rec["lore"]["type"], rec["type_voulu"], rec["types_main"] = typ, typ, True
+        if rec.get("rarete_fixe") == nb_stats.UNIQUE:  # fiche écrite à la main : seulement les multiplicateurs
+            rec["lore"]["combat"].update(nb_stats.weaknesses(typ))
+        elif rec["lore"].get("combat"):
+            self._same_rarity(rec)
+        self.lib.save(rec)
+        self.build_attacks(slug)
+        return self.creature(slug)
+
+    def set_attack(self, slug, index, move_id=None):
+        """L'attaque n° index remplacée par une du catalogue (« feu:souffle »), ou None : de nouveau celle de la plume."""
+        rec = self.lib.load(slug)
+        if rec is None or not (rec.get("lore") or {}).get("combat"):
+            raise ValueError("Pas encore de fiche de combat.")
+        if rec.get("rarete_fixe") == nb_stats.UNIQUE:
+            raise ValueError("Cette créature est unique : ses attaques ne changent pas.")
+        index = int(index)
+        if not 0 <= index < len(rec["lore"]["combat"]["attaques"]):
+            raise ValueError("Attaque inconnue.")
+        tech = nb_moves.get(*(move_id.split(":") + [""])[:2]) if move_id else None
+        if move_id and tech is None:
+            raise ValueError("Attaque inconnue.")
+        rare = rec["lore"]["combat"]["rarete"]
+        if tech and nb_stats.too_rare(tech["element"], tech["genre"], rare):
+            raise ValueError(f"Trop rare pour une créature {rare} : au plus {nb_stats.cap(rare)}.")
+        main = rec.setdefault("attaques_main", {})
+        if move_id:
+            main[str(index)] = move_id
+        else:
+            main.pop(str(index), None)
+        self._same_rarity(rec)
+        self.lib.save(rec)
+        self.build_attacks(slug)
+        return self.creature(slug)
+
+    def moves(self):
+        return [dict(id=m["id"], nom=m["nom"], element=m["element"], genre=m["genre"], rarete=m["rarete"], texte=nb_moves.describe(m))
+                for m in nb_moves.CATALOG.values()]
 
     def retype(self):
         """Créatures déjà faites : une sur deux reçoit un 2e type (sans réécrire la fiche), sa fiche de combat est recalculée."""
@@ -706,8 +926,13 @@ class Studio:
         if rec.get("rarete_fixe") == nb_stats.UNIQUE:
             return rec["lore"]["combat"]  # la créature unique garde sa fiche écrite à la main
         brief = rec.get("brief") or {}
-        return nb_stats.card(rec["slug"], rec["lore"], brief.get("posture", ""), rec.get("rarete_fixe"),
-                             self._prestiges(rec["slug"]), brief.get("anatomie", []))
+        k = nb_stats.card(rec["slug"], rec["lore"], brief.get("posture", ""), rec.get("rarete_fixe"),
+                          self._prestiges(rec["slug"]), brief.get("anatomie", []))
+        for i, mid in (rec.get("attaques_main") or {}).items():  # les attaques choisies à la main restent
+            tech, i = nb_moves.get(*(mid.split(":") + [""])[:2]), int(i)
+            if tech and i < len(k["attaques"]) and not nb_stats.too_rare(tech["element"], tech["genre"], k["rarete"]):
+                k["attaques"][i] = nb_stats.move(rec["slug"], i, k["rarete"], len(k["attaques"]), tech["element"], tech["genre"])
+        return k
 
     def set_rarity(self, slug, rarete=None):
         """Rareté choisie à la main (verrouillée), ou None : de nouveau calculée d'après le prestige."""
@@ -788,10 +1013,11 @@ class Studio:
         except Exception:
             pass
 
-    def inspire(self, theme, seed=None):
+    def inspire(self, theme, seed=None, typ=None):
         if not self.jobs.get()["running"]:
             self._free_gpu()
-        return self.writer.idea(theme or "melange", seed)
+        typ = typ if typ in nb_stats.CHART else nb_stats.target_type(self._type_counts())
+        return self.writer.idea(theme or "melange", seed, typ)
 
     def write_lore(self, slug):
         rec = self.lib.load(slug)
@@ -820,7 +1046,7 @@ class Studio:
         if rec is None:
             raise ValueError("Créature introuvable.")
         if self.jobs.get()["running"]:
-            raise RuntimeError("Une tâche est déjà en cours.")
+            raise RuntimeError(busy_text(self.jobs.get()["kind"]))
         self.lib.set_active(slug, "bas", int(index))
         seed = int(rec["seed"]) + int(index)
         return self.jobs.start("create", lambda progress, cancel: self._rest(self.client(), slug, seed, progress, cancel),
@@ -924,7 +1150,7 @@ class Studio:
         if not instruction:
             raise ValueError("Écris ce qu'il faut changer.")
         if self.jobs.get()["running"]:
-            raise RuntimeError("Une tâche est déjà en cours.")
+            raise RuntimeError(busy_text(self.jobs.get()["kind"]))
         if zone is not None:
             zone = [float(v) for v in zone][:3]
             if len(zone) != 3 or not all(0 <= v <= 1 for v in zone):
@@ -978,7 +1204,7 @@ class Studio:
         if rec is None or key not in self.CUTOUT_KEYS:
             raise ValueError("Image inconnue.")
         if self.jobs.get()["running"]:
-            raise RuntimeError("Une tâche est déjà en cours.")
+            raise RuntimeError(busy_text(self.jobs.get()["kind"]))
         im = self._active(slug, key)
         if im is None:
             raise ValueError("Pas encore d'image à détourer.")
@@ -1047,7 +1273,9 @@ class Studio:
                 continue
             sd = self.lib.dir(rec["slug"]) / "sprites"
             nv = len(rec.get("views", {}).get("bas", {}).get("files", []))
-            out.append(dict(slug=rec["slug"], name=rec["name"], updated=rec.get("updated", 0), versions=nv,
+            lore = rec.get("lore") or {}
+            out.append(dict(slug=rec["slug"], name=rec["name"], updated=rec.get("updated", 0), versions=nv, kind="creature",
+                            rarete=(lore.get("combat") or {}).get("rarete"), type=lore.get("type"),
                             thumb="sprites/bas_repos.png" if (sd / "bas_repos.png").is_file()
                             else (rec.get("views", {}).get("bas", {}).get("files") or [None])[0]))  # esquisse à choisir
         return out
@@ -1322,6 +1550,13 @@ class Studio:
             self._active(slug, "illustration").save(out / "illustration_hd.png")
             meta["illustration"], meta["illustration_hd"] = "illustration.png", "illustration_hd.png"
         design = self._active(slug, "bas")
+        if design is not None:  # le rendu de face du modèle : l'image de la fiche du bestiaire (pixel et HD)
+            box = design.getbbox()
+            (design.crop(box) if box else design).save(out / "face_hd.png")
+            if (sd / "bas_repos.png").is_file():
+                shutil.copyfile(sd / "bas_repos.png", out / "face.png")
+                meta["face"] = "face.png"
+            meta["face_hd"] = "face_hd.png"
         if (sd / "portrait.png").is_file():  # le portrait de combat, sinon le design en grand
             shutil.copyfile(sd / "portrait.png", out / "portrait.png")
         elif design is not None:
@@ -1374,12 +1609,18 @@ def make_handler(studio, token):
         "/status": lambda q: studio.status(),
         "/job": lambda q: studio.jobs.get(),
         "/library": lambda q: studio.library(),
+        "/items": lambda q: studio.items(q.get("kind", "creature")),
+        "/item": lambda q: studio.item(q["kind"], q["slug"]),
         "/balance": lambda q: studio.balance(),
+        "/moves": lambda q: studio.moves(),
+        "/catalog-sheet": lambda q: dict(ok=bool(nb_make.catalog_sheet(studio.lib.root, *q.get("id", ":").split(":")[:2]))),
         "/creature": lambda q: studio.creature(q["slug"]),
         "/exports": lambda q: dict(folder=str(studio.exports_dir())),
     }
     routes_post = {
-        "/create": lambda b: dict(zip(("job", "slug"), studio.create(b.get("name"), b.get("description"), b.get("seed")))),
+        "/create": lambda b: dict(zip(("job", "slug"), studio.create(b.get("name"), b.get("description"), b.get("seed"), b.get("type")))),
+        "/set-types": lambda b: studio.set_types(b["slug"], b.get("types")),
+        "/set-attack": lambda b: studio.set_attack(b["slug"], b.get("index", 0), b.get("id")),
         "/cancel": lambda b: studio.jobs.cancel() or dict(ok=True),
         "/auto": lambda b: dict(job=studio.auto()),
         "/auto-stop": lambda b: setattr(studio, "auto_stop", True) or dict(ok=True),
@@ -1388,7 +1629,7 @@ def make_handler(studio, token):
         "/rarity": lambda b: studio.set_rarity(b["slug"], b.get("rarete")),
         "/cutout": lambda b: studio.cutout(b["slug"], b["key"], b["mask"]),
         "/edit": lambda b: dict(job=studio.edit(b["slug"], b["key"], b.get("instruction"), b.get("zone"), b.get("index"))),
-        "/inspire": lambda b: studio.inspire(b.get("theme"), b.get("seed")),
+        "/inspire": lambda b: studio.inspire(b.get("theme"), b.get("seed"), b.get("type")),
         "/lore": lambda b: studio.write_lore(b["slug"]),
         "/choose": lambda b: studio.choose(b["slug"], b["key"], b.get("delta"), b.get("index")),
         "/lab": lambda b: studio.set_lab(b["slug"], b.get("opts", {})),
@@ -1402,7 +1643,11 @@ def make_handler(studio, token):
         "/illustration": lambda b: dict(job=studio.illustration(b["slug"])),
         "/fuse": lambda b: dict(zip(("job", "slug"), studio.fuse(b.get("a"), b.get("b"), b.get("seed")))),
         "/variant-remove": lambda b: studio.remove_variant(b["slug"], b["variant"]),
-        "/install-models": lambda b: dict(job=studio.install_models()),
+        "/install-models": lambda b: studio.install_models(),
+        "/make": lambda b: dict(job=studio.make(b)),
+        "/item-choose": lambda b: nb_make.choose(studio.lib.root, b["kind"], b["slug"], b.get("delta", 1)),
+        "/favorite": lambda b: studio.favorite(b["kind"], b["slug"], b.get("on")),
+        "/item-delete": lambda b: studio.item_delete(b["kind"], b["slug"]),
         "/start-comfy": lambda b: (studio.client(), studio.status())[1],
         "/shutdown": lambda b: studio.shutdown(),
     }

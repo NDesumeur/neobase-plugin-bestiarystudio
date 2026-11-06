@@ -102,8 +102,8 @@ def model():
 THEMES = {"melange": None, "animaux": None, "monstres": None}
 
 
-def idea(theme="melange", seed=None):
-    return dict(name="Crapaud test", description="un crapaud violet à quatre pattes avec trois yeux rouges", theme=theme)
+def idea(theme="melange", seed=None, typ=None):
+    return dict(name="Crapaud test", description="un crapaud violet à quatre pattes avec trois yeux rouges", theme=theme, type=typ)
 
 
 def brief(description, seed=1):

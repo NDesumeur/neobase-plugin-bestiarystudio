@@ -311,3 +311,26 @@
   .nbs-tabs { max-width: calc(100% - 64px); }
   .nbs-tab, .nbs-tab.on { font-size: 0; padding: 0 10px; }
 }
+
+/* les 4 créations : créature, objet, attaque, musique */
+.nbs-kinds { margin-bottom: 14px; align-items: center; }
+.nbs-kinds .nbs-btn.on, #libKinds .nbs-btn.on, #favOnly.on { filter: brightness(1.25); box-shadow: 0 0 0 2px var(--brass); }
+.nbs-mkopts { gap: 8px; align-items: center; flex-wrap: wrap; }
+.nbs-mkopts .nbs-parch { min-width: 150px; }
+.nbs-mkbox { width: 352px; min-height: 280px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 16px; box-sizing: border-box; }
+.nbs-mkicon { width: 256px; height: 256px; image-rendering: pixelated; }
+.nbs-mk-cv { width: 320px; }
+.nbs-mkver { gap: 8px; align-items: center; color: var(--parch3); }
+.nbs-mkinfo { width: 352px; margin-top: 10px; }
+.nbs-mkinfo .nbs-themes { margin-bottom: 6px; }
+.nbs-mkdisc .ic { width: 128px; height: 128px; background-size: 128px; image-rendering: pixelated; }
+.nbs-mkplay { width: 300px; gap: 10px; align-items: center; color: var(--parch2); }
+.nbs-mkplay .nbs-bar { flex: 1; cursor: inherit; }
+.nbs-sort { min-width: 140px; }
+.nbs-card .nbs-fav { position: absolute; top: -12px; left: -12px; min-height: 40px; width: 40px; opacity: .55; }
+.nbs-card .nbs-fav.on, .nbs-card:hover .nbs-fav { opacity: 1; }
+.nbs-thumb-empty .ic { width: 96px; height: 96px; background-size: 96px; image-rendering: pixelated; }
+.nbs-card .nbs-chip, .nbs-mkinfo .nbs-chip { font: 18px/1.4 "Grimoire", monospace; }
+.nbs-mkinfo .nbs-chip { color: var(--parch); box-shadow: inset 0 0 0 2px var(--ink2); background: var(--ink0); }
+.nbs-mkopts select, .nbs-sort select { font: 20px "Grimoire", monospace; color: var(--ink0); background: transparent; border: 0; outline: 0; width: 100%; }
+.nbs-mkopts select option, .nbs-sort select option { background: #ead7aa; }

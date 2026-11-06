@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
-"""Télécharge les modèles d'image modernes (FLUX.2 klein 4B, Z-Image Turbo) dans ComfyUI portable.
+"""Télécharge les modèles dans ComfyUI portable : image (FLUX.2 klein 4B, Z-Image Turbo), détourage, musique (ACE-Step 1.5).
 
-python install_models.py <dossier ComfyUI portable> [klein] [zimage] [detour]   (sans nom : tous)
+python install_models.py <dossier ComfyUI portable> [klein] [zimage] [detour] [musique]   (sans nom : tous)
 Source : huggingface.co/Comfy-Org (licence Apache 2.0, sans compte). Les fichiers déjà présents sont gardés.
 """
 import sys
@@ -13,7 +13,7 @@ def say(msg):
     print(msg, flush=True)
 
 
-def download(url, dest, label):
+def download(url, dest, label, on=None):
     """Téléchargement en .part puis renommage : un fichier coupé en route n'est jamais pris pour un modèle complet."""
     say(f"Téléchargement : {label}")
     req = urllib.request.Request(url, headers={"User-Agent": "NeoBestiaryStudio-installer"})
@@ -27,7 +27,9 @@ def download(url, dest, label):
                 break
             f.write(chunk)
             done += len(chunk)
-            if total:
+            if on:
+                on(done, total)
+            elif total:
                 print(f"\r  {done * 100 // total:3d} %  ({done >> 20} / {total >> 20} Mo)", end="", flush=True)
     print()
     tmp.replace(dest)
@@ -40,11 +42,16 @@ MODELS = {
     "zimage": [ENCODER, ("diffusion_models", "z_image_turbo_int8_convrot.safetensors", "z_image_turbo", 5.78),
                ("vae", "ae.safetensors", "z_image_turbo", 0.31)],
     "detour": [("background_removal", "birefnet.safetensors", "BiRefNet", 0.41)],  # licence MIT
+    "musique": [("diffusion_models", "acestep_v1.5_turbo.safetensors", "ACE-Step-1.5", 4.46),  # licence Apache 2.0
+                ("text_encoders", "qwen_0.6b_ace15.safetensors", "ACE-Step-1.5", 1.11),
+                ("text_encoders", "qwen_1.7b_ace15.safetensors", "ACE-Step-1.5", 3.45),
+                ("vae", "ace_1.5_vae.safetensors", "ACE-Step-1.5", 0.31)],
 }
+REQUIRED = ("klein", "detour")  # sans eux, le Studio ne dessine rien ; la musique s'installe ensuite, sans bloquer
 PREFIX = {"BiRefNet": ""}  # les autres dépôts rangent leurs fichiers sous split_files/
 
 
-def missing(comfy_root, which=("klein", "detour")):  # Z-Image : seulement si demandé
+def missing(comfy_root, which=REQUIRED):  # Z-Image : seulement si demandé
     """Fichiers absents : [(dossier, nom, dépôt, Go)] sans doublon."""
     models = Path(comfy_root) / "ComfyUI" / "models"
     out = []

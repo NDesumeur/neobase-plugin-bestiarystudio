@@ -31,7 +31,14 @@ const HTML = `<link rel="stylesheet" href="${U}ui/studio.css">
     </section>
 
     <section class="nbs-page on" id="p-creer">
-      <div class="nbs-cols">
+      <div class="nbs-row nbs-themes nbs-kinds" id="kinds">
+        <button class="nbs-btn dark on" data-k="creature">${ic('creer')}Créature</button>
+        <button class="nbs-btn dark" data-k="objet">${ic('objet')}Objet</button>
+        <button class="nbs-btn dark" data-k="attaque">${ic('attaque')}Attaque</button>
+        <button class="nbs-btn dark" data-k="musique">${ic('musique')}Musique</button>
+        <span class="nbs-hint" id="kindBusy"></span>
+      </div>
+      <div class="nbs-cols" id="mkCreature">
         <div class="grow">
           <div class="nbs-title">Inspiration</div>
           <div class="nbs-row nbs-themes" id="themes">
@@ -43,6 +50,7 @@ const HTML = `<link rel="stylesheet" href="${U}ui/studio.css">
             <button class="nbs-btn sm" id="inspire" style="margin-left:auto">${ic('etoile')}Inspire-moi</button>
           </div>
           <span class="nbs-hint" id="inspireMsg"></span>
+          <div class="nbs-row nbs-crtype"><span class="nbs-hint">Type</span><div class="nbs-parch"><select id="crType" title="Auto : un type tiré au sort, les types rares du bestiaire d'abord ; l'idée et le dessin sont faits autour"></select></div></div>
           <div class="nbs-sep"></div>
           <div class="nbs-title">Nom</div>
           <div class="nbs-parch"><input type="text" id="name" maxlength="60" placeholder="Ophidrache, Chien de feu…" spellcheck="false"></div>
@@ -71,6 +79,47 @@ const HTML = `<link rel="stylesheet" href="${U}ui/studio.css">
         <div>
           <div class="nbs-title" id="liveTitle">Grimoire vivant</div>
           <div class="nbs-grid4" id="stages"></div>
+        </div>
+      </div>
+      <div class="nbs-cols" id="mkOther" hidden>
+        <div class="grow">
+          <div class="nbs-title">Nom</div>
+          <div class="nbs-parch"><input type="text" id="mkName" maxlength="60" spellcheck="false"></div>
+          <div class="nbs-sep"></div>
+          <div class="nbs-title" id="mkDescT">Décris</div>
+          <div class="nbs-parch"><textarea id="mkDesc" rows="4"></textarea></div>
+          <div class="nbs-sep"></div>
+          <div class="nbs-row nbs-mkopts" data-only="objet">
+            <span>Catégorie</span><div class="nbs-parch"><select id="mkCat"></select></div>
+            <span>Rareté</span><div class="nbs-parch"><select id="mkRar"></select></div>
+          </div>
+          <div class="nbs-row nbs-mkopts" data-only="attaque">
+            <span>Élément</span><div class="nbs-parch"><select id="mkElem"></select></div>
+            <span>Geste</span><div class="nbs-parch"><select id="mkGenre"></select></div>
+          </div>
+          <div data-only="musique">
+            <div class="nbs-title">Paroles <span class="nbs-hint">(vide : instrumental)</span></div>
+            <div class="nbs-parch"><textarea id="mkLyrics" rows="3" placeholder="[couplet]&#10;…"></textarea></div>
+            <div class="nbs-row nbs-mkopts" style="margin-top:10px">
+              <span>Durée</span><div class="nbs-parch"><select id="mkDur"><option value="30">30 s</option><option value="60" selected>1 min</option><option value="120">2 min</option><option value="180">3 min</option></select></div>
+              <span>Tempo</span><div class="nbs-parch"><select id="mkTempo"><option value="lent">lent</option><option value="moyen" selected>moyen</option><option value="rapide">rapide</option></select></div>
+              <span>Ambiance</span><div class="nbs-parch"><select id="mkMood"><option value="joyeuse">lumineuse</option><option value="sombre">sombre</option></select></div>
+            </div>
+          </div>
+          <div class="nbs-sep"></div>
+          <div class="nbs-row">
+            <button class="nbs-btn go big" id="mkGo">${ic('play')}Créer</button>
+            <button class="nbs-btn red" id="mkCancel" hidden>Arrêter</button>
+            <span class="nbs-hint" id="mkInfo"></span>
+          </div>
+          <div class="nbs-sep"></div>
+          <div class="nbs-bar"><i id="mkBar" style="width:0"></i></div>
+          <div class="nbs-step" id="mkStep">&nbsp;</div>
+        </div>
+        <div>
+          <div class="nbs-title" id="mkPrevT">Aperçu</div>
+          <div class="nbs-well nbs-mkbox" id="mkPrev"><span class="nbs-hint">Rien pour l'instant.</span></div>
+          <div class="nbs-mkinfo" id="mkPrevInfo"></div>
         </div>
       </div>
     </section>
@@ -170,8 +219,18 @@ const HTML = `<link rel="stylesheet" href="${U}ui/studio.css">
     </section>
 
     <section class="nbs-page" id="p-lib">
+      <div class="nbs-row nbs-themes" id="libKinds" style="margin-bottom:10px">
+        <button class="nbs-btn dark sm on" data-k="creature">${ic('creer')}Créatures</button>
+        <button class="nbs-btn dark sm" data-k="objet">${ic('objet')}Objets</button>
+        <button class="nbs-btn dark sm" data-k="attaque">${ic('attaque')}Attaques</button>
+        <button class="nbs-btn dark sm" data-k="musique">${ic('musique')}Musiques</button>
+        <button class="nbs-btn dark sm" id="favOnly" style="margin-left:auto" title="Seulement les favoris">${ic('etoile_vide')}Favoris</button>
+        <div class="nbs-parch nbs-sort"><select id="libSort" title="Trier">
+          <option value="recent">Récents</option><option value="nom">Nom</option><option value="rarete">Rareté</option><option value="type">Type</option>
+        </select></div>
+      </div>
       <div class="nbs-row" style="margin-bottom:12px">
-        <div class="nbs-parch" style="flex:1"><input type="text" id="q" placeholder="Chercher une créature…" spellcheck="false"></div>
+        <div class="nbs-parch" style="flex:1"><input type="text" id="q" placeholder="Chercher…" spellcheck="false"></div>
         <button class="nbs-btn dark" id="fuseBtn" title="Inventer l'hybride de deux créatures">${ic('etoile')}Fusionner</button>
         <button class="nbs-btn dark" id="openExports" title="Les créatures exportées, prêtes pour le bestiaire">${ic('dossier')}Exports</button>
       </div>
@@ -277,23 +336,25 @@ export default async function (ctx) {
       };
       return false;
     }
-    const st = await get('/status');
+    let st = await get('/status');  // le moteur lance tout seul le téléchargement de ce qui manque
     status(st);
     if (st.missing.length) {
       show('setup');
       const gb = st.missing.reduce((a, m) => a + m.gb, 0);
-      body.innerHTML = `<p>Il manque les modèles du grimoire (licences libres, téléchargés depuis Hugging Face) :</p>
+      body.innerHTML = `<p>Installation automatique des modèles du grimoire (locaux, licences libres, depuis Hugging Face) :</p>
         <div class="nbs-parch">${st.missing.map(m => `<div>${esc(m.name)} <span class="nbs-hint">· ${m.gb} Go</span></div>`).join('')}</div>
-        <div class="nbs-sep"></div>
-        <div class="nbs-row"><button class="nbs-btn go" id="inst">${ic('exporter')}Installer (${gb.toFixed(1)} Go)</button></div>
-        <div class="nbs-sep"></div><div class="nbs-bar"><i id="ibar" style="width:0"></i></div><div class="nbs-step" id="istep">&nbsp;</div>`;
-      $('#inst').onclick = async () => {
-        $('#inst').disabled = true;
-        try { await post('/install-models'); } catch (e) { $('#istep').textContent = e.message; return; }
-        await follow(j => { $('#ibar').style.width = j.progress * 100 + '%'; $('#istep').textContent = j.step; });
-        setup();
-      };
-      return false;
+        <div class="nbs-hint">${gb.toFixed(1)} Go pour le dessin, puis le modèle de musique (sans bloquer les créations).</div>
+        <div class="nbs-sep"></div><div class="nbs-bar"><i id="ibar" style="width:0"></i></div><div class="nbs-step" id="istep">&nbsp;</div>
+        <div class="nbs-row" id="iretry" hidden><button class="nbs-btn go" id="inst">${ic('refaire')}Réessayer</button></div>`;
+      $('#inst').onclick = () => { $('#iretry').hidden = true; post('/install-models').then(() => setup()).catch(e => { $('#istep').textContent = e.message; }); };
+      while (S.alive && st.missing.length) {
+        const i = st.install;
+        $('#ibar').style.width = Math.round(i.progress * 100) + '%';
+        $('#istep').textContent = i.error || (i.running ? `${i.step} · ${Math.round(i.progress * 100)} %` : 'Préparation…');
+        if (i.error && !i.running) { $('#iretry').hidden = false; return false; }
+        await new Promise(r => setTimeout(r, 1500));
+        st = await get('/status');
+      }
     }
     if (S.tab === 'setup') show('creer');
     return true;
@@ -312,16 +373,24 @@ export default async function (ctx) {
       await new Promise(r => setTimeout(r, 600));
     }
   }
-  const busy = on => { $('#go').hidden = on; $('#cancel').hidden = !on; $$('.nbs-redo').forEach(b => b.disabled = on); };
-  async function runJob(start) {
+  // une seule création à la fois (créature, objet, attaque ou musique) : tous les boutons Créer attendent la fin
+  const JOB_NAME = { 'make-objet': 'un objet', 'make-attaque': 'une attaque', 'make-musique': 'une musique' };
+  const busy = (on, kind) => {
+    $('#go').hidden = on; $('#cancel').hidden = !on; $$('.nbs-redo').forEach(b => b.disabled = on);
+    $('#mkGo').disabled = on; $('#mkCancel').hidden = !on; $('#auto').disabled = on && !S.auto;
+    $('#kindBusy').textContent = on ? `Création en cours : ${JOB_NAME[kind] || 'une créature'} (une seule à la fois)` : '';
+  };
+  async function runJob(start, out = { bar: '#bar', say }) {
     busy(true);
-    try { await start(); } catch (e) { busy(false); say(e.message, true); return null; }
+    try { await start(); } catch (e) { busy(false); out.say(e.message, true); return null; }
     const j = await follow(j => {
-      $('#bar').style.width = Math.round(j.progress * 100) + '%';
-      say(j.step === 'Préparation' ? 'Préparation… (ComfyUI démarre, ~1 min la première fois)' : `${j.step}… ${Math.round(j.progress * 100)} %`);
+      busy(true, j.kind);
+      $(out.bar).style.width = Math.round(j.progress * 100) + '%';
+      out.say(j.step === 'Préparation' ? 'Préparation… (ComfyUI démarre, ~1 min la première fois)' : `${j.step}… ${Math.round(j.progress * 100)} %`);
     });
     busy(false);
-    if (j.error) { say(j.error, true); return null; }
+    if (j.error) { out.say(j.error, true); return null; }
+    if (j.kind.startsWith('make-')) { out.say({ 'make-objet': 'Objet créé ✓', 'make-attaque': 'Attaque créée ✓', 'make-musique': 'Musique composée ✓' }[j.kind]); return j; }
     say(j.kind === 'sketch' ? 'Choisis ton design ↓' : j.kind === 'edit' ? 'Retouche faite ✓ (nouvelle version)'
       : j.kind === 'portrait' ? 'Portrait de combat prêt ✓ (onglet Directions, fiche)'
       : j.kind === 'illustration' ? 'Image du bestiaire prête ✓ (onglet Directions, fiche)' : 'Créature invoquée ✓');
@@ -337,10 +406,108 @@ export default async function (ctx) {
   $('#go').onclick = () => {
     const description = $('#desc').value.trim();
     if (!description) { say('Décris ta créature d\'abord.', true); $('#desc').focus(); return; }
-    runJob(() => post('/create', { name: $('#name').value.trim() || description.split(/[,.]/)[0].slice(0, 40), description, seed: S.seed }))
-      .then(j => { if (j) { S.seed = Math.floor(Math.random() * 1e6); seedTxt(); } });
+    runJob(() => post('/create', { name: $('#name').value.trim() || description.split(/[,.]/)[0].slice(0, 40), description, seed: S.seed, type: $('#crType').value || S.idType || '' }))
+      .then(j => { if (j) { S.seed = Math.floor(Math.random() * 1e6); S.idType = ''; seedTxt(); } });
   };
   $('#cancel').onclick = () => post('/cancel');
+
+  // ------------------------------------------------------------ créer : objet, attaque, musique
+  const MK = {
+    objet: { desc: "Décris l'objet", ph: "une montre à gousset en or, cadran fêlé, aiguilles qui brillent…", name: 'Montre du temps perdu…' },
+    attaque: { desc: "Décris l'effet de l'attaque", ph: "une lance de glace bleue qui tourbillonne puis éclate en éclats de givre…", name: 'Lance de givre…' },
+    musique: { desc: 'Style de la musique', ph: "chiptune joyeuse pour un village, flûte et percussions 8 bits, ambiance d'aventure…", name: 'Thème du village…' },
+  };
+  const CATS = ['arme', 'armure', 'bouclier', 'potion', 'nourriture', 'outil', 'bijou', 'trésor', 'clé', 'livre', 'objet du quotidien', 'ingrédient'];
+  const ELEMS = ['feu', 'eau', 'plante', 'vent', 'roche', 'glace', 'foudre', 'lumière', 'ombre', 'esprit', 'acier', 'poison'];
+  const opts = (l, lab = x => x) => l.map(x => `<option value="${esc(x)}">${esc(lab(x))}</option>`).join('');
+  const fillOpts = () => {  // au premier usage : RAR et GENRE sont déclarés plus bas
+    if ($('#mkCat').options.length) return;
+    $('#mkCat').innerHTML = opts(CATS); $('#mkRar').innerHTML = opts(RAR.slice(0, 5));
+    $('#mkElem').innerHTML = opts(ELEMS); $('#mkGenre').innerHTML = opts(Object.keys(GENRE), g => GENRE[g]); $('#mkGenre').value = 'projectile';
+  };
+  const mkSay = (msg, bad) => { $('#mkStep').textContent = msg || ' '; $('#mkStep').style.color = bad ? 'var(--red)' : ''; };
+  const mkUrl = (kind, it, f) => `${U}mk/${{ objet: 'objets', attaque: 'attaques', musique: 'musiques' }[kind]}/${it.slug.split('/').map(encodeURIComponent).join('/')}${f}?v=${it.updated || 0}`;
+  S.kind = 'creature';
+  function setKind(k) {
+    S.kind = k;
+    $$('#kinds [data-k]').forEach(b => b.classList.toggle('on', b.dataset.k === k));
+    $('#mkCreature').hidden = k !== 'creature'; $('#mkOther').hidden = k === 'creature';
+    if (k === 'creature') return;
+    fillOpts();
+    $$('#mkOther [data-only]').forEach(x => x.hidden = x.dataset.only !== k);
+    $('#mkDescT').textContent = MK[k].desc; $('#mkDesc').placeholder = MK[k].ph; $('#mkName').placeholder = MK[k].name;
+    if (S.item?.kind !== k) { S.item = null; showItem(null); }
+    $('#mkInfo').textContent = '';
+    $('#mkGo').disabled = !!$('#kindBusy').textContent;  // la musique a pu le bloquer pendant l'installation de son modèle
+    if (k === 'musique') musicState();
+  }
+  $$('#kinds [data-k]').forEach(b => b.onclick = () => setKind(b.dataset.k));
+  async function musicState() {  // le modèle de musique s'installe tout seul en arrière-plan : on montre où il en est
+    if (S.kind !== 'musique' || !S.alive) return;
+    const st = await get('/status').catch(() => null);
+    if (!st) return;
+    const i = st.install, wait = st.missing_music?.length;
+    $('#mkInfo').textContent = !wait ? '' : i.running ? `Modèle de musique : installation ${Math.round(i.progress * 100)} %` : (i.error || 'Modèle de musique pas encore installé');
+    if (wait && !$('#kindBusy').textContent) $('#mkGo').disabled = true;
+    else if (!$('#kindBusy').textContent) $('#mkGo').disabled = false;
+    if (wait) setTimeout(musicState, 2000);
+  }
+  $('#mkGo').onclick = () => {
+    const k = S.kind, description = $('#mkDesc').value.trim();
+    if (!description) { mkSay('Décris ce que tu veux créer d\'abord.', true); $('#mkDesc').focus(); return; }
+    const body = { kind: k, nom: $('#mkName').value.trim(), description, seed: Math.floor(Math.random() * 1e6),
+      categorie: $('#mkCat').value, rarete: $('#mkRar').value, element: $('#mkElem').value, genre: $('#mkGenre').value,
+      paroles: $('#mkLyrics').value, duree: +$('#mkDur').value, tempo: $('#mkTempo').value, ambiance: $('#mkMood').value };
+    runJob(() => post('/make', body), { bar: '#mkBar', say: mkSay }).then(async j => {
+      if (!j?.slug) return;
+      const [kind, ...rest] = j.slug.split('/');
+      showItem(await get(`/item?kind=${kind}&slug=${encodeURIComponent(rest.join('/'))}`));
+    });
+  };
+  $('#mkCancel').onclick = () => post('/cancel');
+  function showItem(it) {
+    S.item = it;
+    const box = $('#mkPrev'), info = $('#mkPrevInfo');
+    box.querySelector('audio')?.pause();  // la musique d'avant s'arrête
+    if (!it) { box.innerHTML = '<span class="nbs-hint">Rien pour l\'instant.</span>'; info.innerHTML = ''; return; }
+    $('#mkPrevT').textContent = it.nom;
+    const chips = [];
+    if (it.kind === 'objet') {
+      box.innerHTML = `<img class="nbs-mkicon" src="${mkUrl('objet', it, `/icone_${it.version || 0}.png`)}" alt="">` + (it.versions > 1
+        ? `<div class="nbs-row nbs-mkver"><button class="nbs-btn dark sq" data-d="-1">${ic('prev')}</button><span>version ${(it.version || 0) + 1}/${it.versions}</span><button class="nbs-btn dark sq" data-d="1">${ic('next')}</button></div>` : '');
+      box.querySelectorAll('[data-d]').forEach(b => b.onclick = async () => showItem(await post('/item-choose', { kind: 'objet', slug: it.slug, delta: +b.dataset.d })));
+      chips.push(`<span class="nbs-rare r${RAR.indexOf(it.rarete)}">${esc(it.rarete)}</span>`, `<span class="nbs-chip">${esc(it.categorie)}</span>`);
+    } else if (it.kind === 'attaque') {
+      box.innerHTML = '<canvas class="nbs-sig-cv nbs-mk-cv" width="320" height="180"></canvas>';
+      chips.push(atkRar(it.rarete), `<span class="nbs-chip">${esc(it.element)}</span>`, `<span class="nbs-chip">${esc(GENRE[it.genre] || it.genre)}</span>`);
+      if (it.mecanique) chips.push(`<div class="nbs-hint">${esc(it.mecanique)}</div>`);
+      if (it.source === 'catalogue') get('/catalog-sheet?id=' + encodeURIComponent(it.id)).then(() => S.item === it && mkLoop()).catch(() => {});  // la planche se fait au 1er clic
+      else mkLoop();
+      if (it.source === 'signature') chips.unshift(`<span class="nbs-chip">signature ${it.creature === 'neome' ? 'NeoMe' : esc(it.creature)}</span>`);
+    } else {
+      box.innerHTML = `<div class="nbs-mkdisc">${ic('musique')}</div><audio src="${mkUrl('musique', it, '/musique.mp3')}"></audio>
+        <div class="nbs-row nbs-mkplay"><button class="nbs-btn dark sq">${ic('play')}</button><div class="nbs-bar"><i style="width:0"></i></div><span>0:00</span></div>`;
+      const a = box.querySelector('audio'), b = box.querySelector('.nbs-mkplay button'), bar = box.querySelector('.nbs-mkplay .nbs-bar');
+      const mmss = t => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
+      b.onclick = () => a.paused ? a.play() : a.pause();
+      a.onplay = a.onpause = () => b.innerHTML = ic(a.paused ? 'play' : 'pause');
+      a.ontimeupdate = () => { bar.firstChild.style.width = (100 * a.currentTime / (a.duration || 1)) + '%'; box.querySelector('.nbs-mkplay span').textContent = mmss(a.currentTime) + ' / ' + mmss(a.duration || 0); };
+      bar.onclick = e => { if (a.duration) a.currentTime = a.duration * e.offsetX / bar.clientWidth; };
+      chips.push(`<span class="nbs-chip">${Math.round(it.duree)} s</span>`, `<span class="nbs-chip">${esc(it.tempo)}</span>`, `<span class="nbs-chip">${esc(it.ambiance === 'sombre' ? 'sombre' : 'lumineuse')}</span>`);
+    }
+    info.innerHTML = `<div class="nbs-row nbs-themes">${chips.join('')}</div><div class="nbs-hint">${esc(it.description || '')}</div>`;
+  }
+  function mkLoop() {  // l'attaque créée, rejouée en boucle avec sa mise en scène (comme NeoMe dans Directions)
+    if (S.mkRun) return; S.mkRun = true;
+    const step = now => {
+      const cv = $('.nbs-mk-cv'), it = S.item;
+      if (!cv || !view.isConnected || it?.kind !== 'attaque') { S.mkRun = false; return; }
+      const sig = it.source === 'signature', show = sig ? SIG_SHOW[it.visuel] : it.show;  // une signature : sa planche et sa mise en scène de l'Arène
+      if (S.tab === 'creer') sigDraw(cv, now % show.len, { show, sheet: sig ? `${U}lib/${encodeURIComponent(it.creature)}/signature/${it.visuel}.png` : mkUrl('attaque', it, it.source === 'catalogue' ? '_planche.png' : '/planche.png'), X: [96, 236], ground: 124 });
+      requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  }
 
   // ------------------------------------------------------------ invocation en boucle : rappuyer l'arrête après la créature en cours
   $('#auto').onclick = async () => {
@@ -373,14 +540,17 @@ export default async function (ctx) {
     S.theme = b.dataset.t;
     $$('#themes [data-t]').forEach(x => x.classList.toggle('on', x === b));
   });
+  $('#crType').innerHTML = `<option value="">Auto (les types rares d'abord)</option>` + ELEMS.map(t => `<option value="${t}">${t}</option>`).join('');
+  $('#crType').onchange = () => { S.idType = ''; };
   $('#inspire').onclick = async () => {
     const b = $('#inspire'), msg = $('#inspireMsg');
     b.disabled = true; msg.textContent = 'La plume réfléchit… (une minute la première fois)';
     try {
-      const i = await post('/inspire', { theme: S.theme });
+      const i = await post('/inspire', { theme: S.theme, type: $('#crType').value });
       if (i.name) $('#name').value = i.name;
       $('#desc').value = i.description;
-      msg.textContent = 'Idée prête : retouche-la si tu veux, puis Invoquer.';
+      S.idType = i.type || '';
+      msg.textContent = `Idée prête${i.type ? ` (type ${i.type})` : ''} : retouche-la si tu veux, puis Invoquer.`;
     } catch (e) { msg.textContent = e.message; }
     b.disabled = false;
   };
@@ -422,18 +592,28 @@ export default async function (ctx) {
     const f = S.cr?.lore, box = $('#fiche'), F = form();
     if (!S.cr) { box.innerHTML = '<div class="nbs-hint">Aucune créature ouverte.</div>'; return; }
     const big = S.cr.illustration ? src(F.dossier + 'illustration.png') : S.cr.portrait ? src(F.dossier + 'portrait.png') : '';
-    const pic = big || src(F.dossier + 'bas_repos.png');
+    const face = F.id === 'base' && S.cr.views?.bas?.file;  // le rendu de face du modèle (HD), plus l'image du bestiaire
+    const pic = face ? src(face) : big || src(F.dossier + 'bas_repos.png');
     const pv = S.cr.portrait_version || [0, 0], iv = S.cr.illustration_version || [0, 0];
     $('#pVer').textContent = pv[1] ? `${pv[0]} / ${pv[1]}` : '—';
     $('#iVer').textContent = iv[1] ? `${iv[0]} / ${iv[1]}` : '—';
     $('#iNote').textContent = (S.cr.illustration_note || '').replace(/^bestiaire\s*/, '');
-    box.innerHTML = f ? `<div class="nbs-fiche-top">${pic ? `<div class="nbs-fiche-pic nbs-well${big ? ' big' : ''}"><img src="${pic}" alt=""></div>` : ''}
+    box.innerHTML = f ? `<div class="nbs-fiche-top">${pic ? `<div class="nbs-fiche-pic nbs-well${face || big ? ' big' : ''}"><img src="${pic}" alt="" title="De face"></div>` : ''}
       <div><div class="nbs-fiche-head"><b>${esc(F.nom || S.cr.name)}</b>${String(F.id === 'base' || F.id === 'chromatique' ? f.type : F.id).split(' et ').map(t => `<span class="nbs-type">${esc(t)}</span>`).join('')}</div>
       <dl class="nbs-fiche-stats"><dt>Espèce</dt><dd>${esc(f.espece)}</dd><dt>Taille</dt><dd>${esc(f.taille)}</dd>
       <dt>Poids</dt><dd>${esc(f.poids)}</dd><dt>Habitat</dt><dd>${esc(f.habitat)}</dd></dl></div></div>
       <p class="nbs-read">${esc(f.description)}</p>
       <div class="nbs-story"><div class="nbs-story-t">Légende</div><p class="nbs-read">${esc(f.histoire)}</p></div>${combat(F.combat || f.combat, S.cr.illustration && S.cr.portrait ? src(F.dossier + 'portrait.png') : '')}`
       : '<div class="nbs-hint">Pas encore de fiche : clique « Réécrire la fiche ».</div>';
+    const edit = async (route, body, what) => {
+      $('#loreMsg').textContent = what;
+      try { refresh(await post(route, { slug: S.cr.slug, ...body })); $('#loreMsg').textContent = ''; }
+      catch (e) { $('#loreMsg').textContent = e.message; }
+    };
+    const t1 = $('#typeSel1'), t2 = $('#typeSel2');
+    if (t1) t1.onchange = t2.onchange = () => edit('/set-types', { types: [t1.value, t2.value] }, 'Nouveaux types…');
+    $$('#fiche .nbs-movesel').forEach(s => s.onchange = () => edit('/set-attack', { index: +s.dataset.i, id: s.value || null }, 'Nouvelle attaque…'));
+    if (f?.combat && !S.moves) get('/moves').then(m => { S.moves = m; renderFiche(); }).catch(() => {});
     const rs = $('#rarSel');
     if (rs) rs.onchange = async () => {
       $('#loreMsg').textContent = 'Nouvelle rareté…';
@@ -451,6 +631,7 @@ export default async function (ctx) {
     : a.effet?.soin ? `<span class="nbs-pow">soigne ${a.effet.soin} % des PV</span>`
     : a.effet?.attaque ? `<span class="nbs-pow">attaque +${a.effet.attaque} %</span>`
     : `<span class="nbs-pow">puissance ${a.puissance}</span>${a.statut ? ` <span class="nbs-pow">· ${STATUT[a.statut.nom] || esc(a.statut.nom)} (${a.statut.chance} %)</span>` : ''}`;
+  const atkRar = r => r ? `<span class="nbs-rare r${RAR.indexOf(r)}">${esc(r)}</span> ` : '';
   function combat(k, portrait) {
     if (!k) return '';
     const xm = (k, e) => ({4: ' ×4', 2: ' ×2', .5: ' ×½', .25: ' ×¼'})[(k.multiplicateurs || {})[e]] || '';  // table des types : ×4, ×2, ×½, ×¼
@@ -459,10 +640,17 @@ export default async function (ctx) {
     const rar = base && k.rarete !== '???' ? `<select class="nbs-rarsel" id="rarSel" title="Rareté : calculée d'après le prestige, ou choisie à la main">
         <option value="">auto${k.prestige != null ? ` · prestige ${k.prestige}` : ''}</option>
         ${RAR.slice(0, 5).map(r => `<option value="${r}"${k.rarete_fixe && k.rarete === r ? ' selected' : ''}>${r} (fixée)</option>`).join('')}</select>` : '';
-    return `<div class="nbs-combat">${portrait ? `<div class="nbs-fiche-pic nbs-well nbs-combat-pic"><img src="${portrait}" alt="" title="Portrait de combat"></div>` : ''}<div class="nbs-combat-head"><span class="nbs-rare r${RAR.indexOf(k.rarete)}">${esc(k.rarete)}</span>${k.rarete_fixe ? ' <span class="nbs-pow">🔒</span>' : ''} ${rar}</div>
+    const hand = base && k.rarete !== '???', ts = String(S.cr.lore?.type || '').split(' et ');
+    const tsel = (id, v, none) => `<select class="nbs-rarsel" id="${id}" title="Type choisi à la main">${none ? '<option value="">—</option>' : ''}${ELEMS.map(t => `<option${t === v ? ' selected' : ''}>${t}</option>`).join('')}</select>`;
+    const types = hand ? `<div class="nbs-combat-head"><span class="nbs-hint">Types</span> ${tsel('typeSel1', ts[0])} ${tsel('typeSel2', ts[1] || '', true)}</div>` : '';
+    const top = Math.min(4, RAR.indexOf(k.rarete) + 2), ok = m => RAR.indexOf(m.rarete) <= top;  // jusqu'à 2 crans au-dessus de la créature
+    const msel = (a, i) => !hand || !S.moves ? '' : `<select class="nbs-rarsel nbs-movesel" data-i="${i}" title="Changer cette attaque">
+        <option value="">changer…</option>${ELEMS.map(e => `<optgroup label="${e}">${S.moves.filter(m => m.element === e && ok(m)).map(m =>
+          `<option value="${m.id}"${m.id === a.id ? ' selected' : ''}>${esc(m.nom)} · ${GENRE[m.genre] || m.genre} · ${m.rarete}</option>`).join('')}</optgroup>`).join('')}</select>`;
+    return `<div class="nbs-combat">${portrait ? `<div class="nbs-fiche-pic nbs-well nbs-combat-pic"><img src="${portrait}" alt="" title="Portrait de combat"></div>` : ''}<div class="nbs-combat-head"><span class="nbs-rare r${RAR.indexOf(k.rarete)}">${esc(k.rarete)}</span>${k.rarete_fixe ? ' <span class="nbs-pow">🔒</span>' : ''} ${rar}</div>${types}
       <div class="nbs-statgrid">${Object.entries(STAT).map(([key, label]) => `<span>${label}</span><i><b style="width:${Math.min(100, k.stats[key])}%"></b></i><em>${k.stats[key]}</em>`).join('')}</div>
       <div class="nbs-read nbs-weak"><b>Faible contre</b> ${chips(k.faiblesses.map(e => e + xm(k, e)), 'bad')} &nbsp; <b>Résiste à</b> ${chips(k.resistances.map(e => e + xm(k, e)), 'good')}${(k.immunites || []).length ? ` &nbsp; <b>Immunisé contre</b> ${chips(k.immunites, 'good')}` : ''}</div>
-      ${k.attaques.map((a, i) => `<div class="nbs-move"><div class="nbs-move-t">${i + 1}. ${esc(a.nom)} <span class="nbs-chip">${esc(a.element)}</span> <span class="nbs-chip">${GENRE[a.genre] || esc(a.genre)}</span> ${moveExtra(a)}</div><p class="nbs-read">${esc(a.description)}</p></div>`).join('')}</div>`;
+      ${k.attaques.map((a, i) => `<div class="nbs-move"><div class="nbs-move-t">${i + 1}. ${esc(a.nom)} ${atkRar(k.rarete === '???' ? '???' : a.rarete || S.moves?.find(m => m.id === a.id)?.rarete)}<span class="nbs-chip">${esc(a.element)}</span> <span class="nbs-chip">${GENRE[a.genre] || esc(a.genre)}</span> ${moveExtra(a)} ${msel(a, i)}</div><p class="nbs-read">${esc(a.description)}</p></div>`).join('')}</div>`;
   }
   // ------------------------------------------------------------ attaques animées (corps + calque d'effet)
   const imgCache = {};
@@ -493,14 +681,15 @@ export default async function (ctx) {
   };
   // o (Sprite Lab) : { v, ground, X, flip } — seulement les effets, autour du héros qui se déplace ; t = ms depuis le début de l'attaque
   function sigDraw(cv, now, o) {
-    const v = o?.v || cv.dataset.v, P = SIG_SHOW[v], g = cv.getContext('2d'), t = o ? now : now % P.len, W = cv.width, H = cv.height,
+    const v = o?.v || cv.dataset.v, P = o?.show || SIG_SHOW[v], g = cv.getContext('2d'), t = o ? now : now % P.len, W = cv.width, H = cv.height,
       GROUND = o?.ground ?? 124, cy = GROUND - 30, X = o?.X || [96, 236];
     g.imageSmoothingEnabled = false; g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, W, H);
     if (!o) for (const x of X) { g.fillStyle = 'rgba(0,0,0,.35)'; g.beginPath(); g.ellipse(x, GROUND + 2, 18, 4, 0, 0, 7); g.fill(); }
     if (!o && t > 120 && t < 900) { g.fillStyle = 'rgba(0,0,0,.45)'; g.fillRect(0, 0, W, H); }  // la scène s'assombrit pendant l'attaque, comme dans l'Arène
     if (o?.flip) g.setTransform(-1, 0, 0, 1, 2 * X[0], 0);  // tourné vers la gauche : les effets en miroir autour de NeoMe
-    const i = Math.floor(t / 110), body = pic(src(form().dossier + (i < 4 ? `attaque${cv.dataset.n}_droite_${i}.png` : 'droite_repos.png')));
-    if (!o && body.complete) g.drawImage(body, X[0] - 32, GROUND - 62);
+    if (o?.sheet) for (const x of X) { g.fillStyle = 'rgba(122,79,154,.35)'; g.beginPath(); g.ellipse(x, GROUND + 2, 18, 4, 0, 0, 7); g.fill(); }  // aperçu d'une attaque créée : lanceur et cible
+    const i = Math.floor(t / 110), body = !o && pic(src(form().dossier + (i < 4 ? `attaque${cv.dataset.n}_droite_${i}.png` : 'droite_repos.png')));
+    if (body?.complete) g.drawImage(body, X[0] - 32, GROUND - 62);
     const tg = pic(src(form().dossier + 'gauche_repos.png'));  // la cible : une silhouette, qui recule sous le coup
     if (tg.complete && v !== 'coquille') { g.save(); g.globalAlpha = .35; g.filter = 'brightness(0)'; g.drawImage(tg, X[1] - 32 + (t >= P.hitAt && t < P.hitAt + 300 ? 3 : 0), GROUND - 62); g.restore(); }
     for (const [x0, k, r1, c, ms, w] of P.rings) {  // les ondes de choc
@@ -508,7 +697,7 @@ export default async function (ctx) {
       const r = 4 + (r1 - 4) * (1 - (1 - u) ** 3);
       g.strokeStyle = c; g.globalAlpha = 1 - u; g.lineWidth = w; g.beginPath(); g.ellipse(X[k], cy - 6, r, r * .55, 0, 0, 7); g.stroke(); g.globalAlpha = 1;
     }
-    const sheet = pic(src('signature/' + v + '.png'));
+    const sheet = pic(o?.sheet || src('signature/' + v + '.png'));
     if (sheet.complete) for (const [t0, row, at, size, ms, o] of P.parts) {
       const dt = t - t0; if (dt < 0 || (o.until && t >= o.until)) continue;
       const loop = o.beam || o.travel, f = loop ? Math.floor(dt / ms) % 10 : Math.floor(dt / ms); if (f > 9) continue;
@@ -908,20 +1097,84 @@ export default async function (ctx) {
 
   // ------------------------------------------------------------ bibliothèque
   let libCache = [];
+  S.libKind = 'creature'; S.favOnly = false;
+  try { $('#libSort').value = localStorage.getItem('nbs-sort') || 'recent'; } catch {}
   async function loadLib() {
-    try { libCache = await get('/library'); } catch (e) { $('#lib').textContent = e.message; return; }
+    const kind = S.libKind;
+    let list;
+    try { list = await get('/items?kind=' + kind); } catch (e) { $('#lib').textContent = e.message; return; }
+    if (kind !== S.libKind) return;  // un autre genre a été choisi pendant le chargement : sa propre réponse l'affichera
+    libCache = list;
     renderLib();
   }
+  $$('#libKinds [data-k]').forEach(b => b.onclick = () => {
+    S.libKind = b.dataset.k; S.fuse = null; fuseBar();
+    $$('#libKinds [data-k]').forEach(x => x.classList.toggle('on', x === b));
+    $('#fuseBtn').hidden = S.libKind !== 'creature';
+    libCache = []; $('#lib').innerHTML = '';  // pas de clic sur une carte de l'ancien genre pendant le chargement
+    loadLib();
+  });
+  $('#favOnly').onclick = () => {
+    S.favOnly = !S.favOnly; $('#favOnly').classList.toggle('on', S.favOnly);
+    $('#favOnly .ic').style.backgroundImage = `url(${U}ui/i_${S.favOnly ? 'etoile' : 'etoile_vide'}.png)`;
+    renderLib();
+  };
+  $('#libSort').onchange = () => { try { localStorage.setItem('nbs-sort', $('#libSort').value); } catch {} renderLib(); };
+  const nameOf = c => c.name || c.nom || '';
+  const typeOf = c => c.type || c.categorie || c.element || '';
+  const rankOf = c => c.rarete ? RAR.indexOf(c.rarete) : (c.force || 0) / 1000;
+  const SORT = {
+    recent: (a, b) => (b.updated || b.created || 0) - (a.updated || a.created || 0),
+    nom: (a, b) => nameOf(a).localeCompare(nameOf(b), 'fr'),
+    rarete: (a, b) => rankOf(b) - rankOf(a) || nameOf(a).localeCompare(nameOf(b), 'fr'),
+    type: (a, b) => typeOf(a).localeCompare(typeOf(b), 'fr') || nameOf(a).localeCompare(nameOf(b), 'fr'),
+  };
+  function thumbOf(c) {
+    if (S.libKind === 'creature') return c.thumb ? `${U}lib/${encodeURIComponent(c.slug)}/${c.thumb}?v=${c.updated}` : '';
+    if (S.libKind === 'objet') return mkUrl('objet', c, `/icone_${c.version || 0}.png`);
+    if (S.libKind === 'attaque') return mkUrl('attaque', c, c.source ? '.png' : '/vignette.png');
+    return '';
+  }
+  function cardMeta(c) {
+    const r = c.rarete ? `<span class="nbs-rare r${RAR.indexOf(c.rarete)}">${esc(c.rarete)}</span>` : '';
+    if (S.libKind === 'creature') return r + String(c.type || '').split(' et ').filter(Boolean).map(t => `<span class="nbs-chip">${esc(t)}</span>`).join('') || `${c.versions} version${c.versions > 1 ? 's' : ''}`;
+    if (S.libKind === 'objet') return r + `<span class="nbs-chip">${esc(c.categorie)}</span>`;
+    if (S.libKind === 'attaque') return r + `<span class="nbs-chip">${esc(c.element)}</span><span class="nbs-chip">${esc(GENRE[c.genre] || c.genre)}</span>`;
+    return `<span class="nbs-chip">${Math.round(c.duree)} s</span>`;
+  }
+  const EMPTY = { creature: 'Aucune créature pour l\'instant : invoque la première dans Créer.', objet: 'Aucun objet : crée le premier dans Créer › Objet.',
+    attaque: 'Aucune attaque.', musique: 'Aucune musique : compose la première dans Créer › Musique.' };
   function renderLib() {
-    const q = $('#q').value.trim().toLowerCase();
-    const list = libCache.filter(c => !q || c.name.toLowerCase().includes(q));
+    const q = $('#q').value.trim().toLowerCase(), by = SORT[$('#libSort').value] || SORT.recent;
+    const list = libCache.filter(c => (!q || nameOf(c).toLowerCase().includes(q) || typeOf(c).toLowerCase().includes(q)) && (!S.favOnly || c.fav))
+      .sort((a, b) => (b.fav - a.fav) || by(a, b));  // les favoris d'abord
     $('#lib').innerHTML = list.length ? list.map(c => `<div class="nbs-card" data-s="${esc(c.slug)}">
-      ${c.thumb ? `<img src="${U}lib/${encodeURIComponent(c.slug)}/${c.thumb}?v=${c.updated}" alt="">` : '<div class="nbs-thumb-empty">?</div>'}
-      <div class="nm">${esc(c.name)}</div><div class="meta">${c.versions} version${c.versions > 1 ? 's' : ''}</div>
-      <button class="nbs-btn red sq nbs-del" title="Mettre à la corbeille">${ic('corbeille')}</button></div>`).join('')
-      : '<div class="nbs-hint">Aucune créature pour l\'instant : invoque la première dans Créer.</div>';
+      ${thumbOf(c) ? `<img src="${thumbOf(c)}" alt="">` : `<div class="nbs-thumb-empty">${S.libKind === 'musique' ? ic('musique') : '?'}</div>`}
+      <div class="nm">${esc(nameOf(c))}</div><div class="meta">${cardMeta(c)}</div>
+      <button class="nbs-btn dark sq nbs-fav${c.fav ? ' on' : ''}" title="${c.fav ? 'Retirer des favoris' : 'Ajouter aux favoris'}">${ic(c.fav ? 'etoile' : 'etoile_vide')}</button>
+      ${c.source ? '' : `<button class="nbs-btn red sq nbs-del" title="Mettre à la corbeille">${ic('corbeille')}</button>`}</div>`).join('')
+      : `<div class="nbs-hint">${S.favOnly ? 'Aucun favori ici : clique sur l\'étoile d\'une carte.' : EMPTY[S.libKind]}</div>`;
     $$('#lib .nbs-card').forEach(card => {
       card.classList.toggle('picked', !!S.fuse?.includes(card.dataset.s));
+      const it = libCache.find(c => c.slug === card.dataset.s);
+      card.querySelector('.nbs-fav').onclick = async e => {
+        e.stopPropagation();
+        try { await post('/favorite', { kind: S.libKind, slug: it.slug, on: !it.fav }); it.fav = !it.fav; renderLib(); } catch (err) { say(err.message, true); }
+      };
+      if (S.libKind !== 'creature') {
+        card.onclick = async e => {
+          const del = e.target.closest('.nbs-del');
+          if (del) {
+            e.stopPropagation();
+            if (!del.classList.contains('sure')) { del.classList.add('sure'); del.title = 'Clique encore pour confirmer'; setTimeout(() => del.classList.remove('sure'), 3000); return; }
+            await post('/item-delete', { kind: S.libKind, slug: it.slug });
+            if (S.item?.slug === it.slug) S.item = null;
+            return loadLib();
+          }
+          show('creer'); setKind(S.libKind); showItem(it);
+        };
+        return;
+      }
       card.onclick = async e => {
         if (S.fuse) {  // mode fusion : on choisit deux créatures
           const i = S.fuse.indexOf(card.dataset.s);

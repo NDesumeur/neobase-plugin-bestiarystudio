@@ -546,6 +546,65 @@ ICONS["etoile"] = outline(grid([
     "................",
 ]))
 
+ICONS["etoile_vide"] = recolor(ICONS["etoile"], {"B": "t", "b": "S", "n": "s", "w": "U"})  # pas en favori
+
+ICONS["objet"] = outline(grid([   # fiole de potion : les objets
+    "................",
+    "......nnnn......",
+    "......bBBb......",
+    ".......qq.......",
+    ".......PP.......",
+    "......wPPq......",
+    ".....wPPPPq.....",
+    "....wrrrrrrR....",
+    "...wrrwrrrrrR...",
+    "...rrwrrrrrrR...",
+    "...rrrrrrrrrR...",
+    "...rrrrrrrrRR...",
+    "....rrrrrrRR....",
+    ".....RRRRRR.....",
+    "................",
+    "................",
+]))
+
+ICONS["attaque"] = outline(grid([   # éclat d'énergie : les attaques
+    "................",
+    ".......B........",
+    ".......B........",
+    "..B....B....B...",
+    "...B..BwB..B....",
+    "....BBwwwBB.....",
+    ".....BwwwB......",
+    ".BBBBwwgwwBBBB..",
+    ".....BwwwB......",
+    "....BBwwwBB.....",
+    "...B..BwB..B....",
+    "..B....B....B...",
+    ".......B........",
+    ".......B........",
+    "................",
+    "................",
+]))
+
+ICONS["musique"] = outline(grid([   # double croche : les musiques
+    "................",
+    "......lllllll...",
+    "......lvvvvvl...",
+    "......lllllll...",
+    "......l.....l...",
+    "......l.....l...",
+    "......l.....l...",
+    "......l.....l...",
+    "......l.....l...",
+    "...vvvl..vvvl...",
+    "..vlllvl.vlllvl.",
+    "..vlllv..vlllv..",
+    "...vvv....vvv...",
+    "................",
+    "................",
+    "................",
+]))
+
 ICONS["de"] = outline(grid([      # dé : nouvelle graine
     "................",
     "................",

@@ -99,20 +99,21 @@ def _clean(v, limit=600):
     return " ".join(str(v or "").split())[:limit]
 
 
-def idea(theme="melange", seed=None):
+def idea(theme="melange", seed=None, typ=None):
     """{"name", "description"} : une créature inventée, décrite comme une consigne claire pour le dessin."""
     seed = random.randrange(10 ** 6) if seed is None else int(seed)
     label, words = THEMES.get(theme, THEMES["melange"])
     rnd = random.Random(seed)
     sparks = rnd.sample(words, 2)
     prompt = (f"Thème : {label}. Inspiration de départ : {sparks[0]}, avec une touche de {sparks[1]}.\n"
-              "Invente une créature originale. JSON avec exactement deux clés : "
+              + (f"Elle est de type {typ} : son corps, ses couleurs et ses matières le montrent au premier coup d'œil.\n" if typ else "")
+              + "Invente une créature originale. JSON avec exactement deux clés : "
               "\"nom\" (un nom inventé, court, qui sonne bien en français) et \"description\" (la consigne de dessin).")
     out = _ask(SYS_IDEA, prompt, seed, temperature=0.95)
     name, desc = _clean(out.get("nom"), 60), _clean(out.get("description"), 400)
     if not desc:
         raise WriterError("La plume n'a rien proposé, réessaie.")
-    return dict(name=name, description=desc, theme=theme)
+    return dict(name=name, description=desc, theme=theme, type=typ)
 
 
 def fuse(a, b, seed=None):

@@ -120,6 +120,20 @@ def main():
         _, c = call(port, "/rarity", {"slug": slug, "rarete": None})
         assert c["lore"]["combat"]["rarete"] == k["rarete"] and not c["lore"]["combat"]["rarete_fixe"]
         assert set(c["attack_fx"]["2"]) == {"bas", "haut", "gauche", "droite"}, c["attack_fx"]
+        # types et attaques choisis à la main : la rareté reste, les attaques suivent, le choix tient après un recalcul
+        _, c = call(port, "/set-types", {"slug": slug, "types": ["glace", "foudre"]})
+        kk = c["lore"]["combat"]
+        assert c["lore"]["type"] == "glace et foudre" and kk["rarete"] == k["rarete"] and "feu" in kk["faiblesses"], kk
+        assert call(port, "/set-types", {"slug": slug, "types": ["glace", "glace"]})[0] == 400
+        _, c = call(port, "/set-attack", {"slug": slug, "index": 1, "id": "feu:souffle"})
+        assert c["lore"]["combat"]["attaques"][1]["id"] == "feu:souffle", c["lore"]["combat"]["attaques"]
+        _, c = call(port, "/rarity", {"slug": slug, "rarete": None})
+        assert c["lore"]["combat"]["attaques"][1]["id"] == "feu:souffle" and c["lore"]["type"] == "glace et foudre"
+        assert call(port, "/set-attack", {"slug": slug, "index": 1, "id": "feu:nimporte"})[0] == 400
+        _, c = call(port, "/set-attack", {"slug": slug, "index": 1})
+        assert c["lore"]["combat"]["attaques"][1]["id"] != "feu:souffle"
+        _, mv = call(port, "/moves")
+        assert len(mv) == 204, len(mv)
         n = c["views"]["gauche"]["versions"]
         assert call(port, "/edit", {"slug": slug, "key": "gauche", "instruction": ""})[0] == 400, "retouche vide acceptée"
         assert call(port, "/edit", {"slug": slug, "key": "gauche", "instruction": "une corne", "zone": [.5, .3, .1]})[0] == 200
@@ -199,12 +213,15 @@ def main():
         assert c["variants"] == ["chromatique"] and not (Path(lib) / "creatures" / slug / "sprites/variantes/glace").exists()
         _, i = call(port, "/inspire", {"theme": "lovecraft"})
         assert i["description"], i
+        _, i = call(port, "/inspire", {"theme": "lovecraft", "type": "acier"})
+        assert i["type"] == "acier", i
 
         _, e = call(port, "/export", {"slug": slug})
         meta = json.loads(Path(e["json"]).read_text(encoding="utf-8"))
         assert meta["rows"] == 4 and meta["directions"]["haut"]["row"] == 3 and Path(e["png"]).is_file()
         assert meta["fiche"]["histoire"] and (Path(e["folder"]) / "portrait.png").is_file()
         assert (Path(e["folder"]) / meta["illustration"]).is_file() and (Path(e["folder"]) / meta["illustration_hd"]).is_file()
+        assert (Path(e["folder"]) / meta["face_hd"]).is_file() and (Path(e["folder"]) / meta["face"]).is_file(), meta.get("face")
         atk = meta["attaques"][-1]
         assert atk["genre"] == "projectile" and (Path(e["folder"]) / atk["effet_image"]).is_file(), atk
         assert len(atk["directions"]["gauche"]["frames"]) == 4 and "effet_decalage" in atk["directions"]["bas"]["frames"][2]
