@@ -1,9 +1,9 @@
 {
   "pluginId": "neodex.bestiarystudio",
   "repo": "NDesumeur/neodex-plugin-bestiarystudio",
-  "version": "1.7.1",
-  "sha256": "a23e8e5e6e78f7d21f1c154f4978971e7823cb96b51e12a92c3084c2ee8e5dbe",
-  "approvedAt": "2026-11-06T22:35:55.077Z",
+  "version": "1.8.0",
+  "sha256": "5e5b8fcf7bcdcc8bf3ad341b609d3c2a0e52d8c977f115a0952e6605ba2f2cb9",
+  "approvedAt": "2026-11-06T23:26:15.584Z",
   "neobase": ">=4.1.0",
-  "signature": "KagF7jKdwUblrxDaAG0qb9Xla0rZTVwHQFiNxc8+0fByE4svrK8a0tTlHneaEKE48V6wW3TE6jPTxPYsk/V8Dw=="
+  "signature": "8ahLrqQKDPOgcGCRsejI80ltFThZC6SxmFJwasqbPUsq46XwwV2Urq7+q8un9SXbeyE0CE0u6QqEj6V7BCdvAg=="
 }
