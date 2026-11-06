@@ -10,6 +10,8 @@
   "neobase": ">=4.1.0",
   "type": "app",
   "category": "Création",
+  "syncMode": "aucune",
+  "syncInfo": "Rien n'est synchronisé : les créatures, modèles et images générés restent sur le PC qui a la carte graphique.",
   "mobile": false,
   "system": false,
   "dependencies": {},
