@@ -151,7 +151,7 @@ const HTML = `<link rel="stylesheet" href="${U}ui/studio.css">
         </div>
         <div class="grow">
           <div class="nbs-title">Aperçu en jeu</div>
-          <div class="nbs-world" id="world"><div class="road"></div><img class="hero" id="hero" alt=""><img class="fx" id="heroFx" alt=""></div>
+          <div class="nbs-world" id="world"><div class="road"></div><img class="hero" id="hero" alt=""><img class="fx" id="heroFx" alt=""><canvas class="sig" id="heroSig" width="1" height="1"></canvas></div>
           <div class="nbs-keys" style="margin-top:8px">Flèches : marcher · 1 à 4 : attaquer</div>
           <div class="nbs-sep"></div>
           <div class="nbs-title">Réglages</div>
@@ -491,13 +491,16 @@ export default async function (ctx) {
     casque: { len: 1900, hitAt: 780, parts: [[0, 0, 0, 160, 40, { dy: -6, until: 780 }], [360, 1, 0, 96, 50, { dx: 18, dy: -8, travel: 420, until: 780 }], [780, 2, 1, 190, 55, { dy: -6 }]], rings: [[0, 0, 70, '#ff4fd8', 480, 3], [110, 0, 90, '#5ef0ff', 480, 3], [220, 0, 110, '#ff4fd8', 480, 3], [780, 1, 110, '#5ef0ff', 520, 5], [860, 1, 80, '#ff4fd8', 480, 4]] },
     coquille: { len: 1500, hitAt: 520, parts: [[0, 0, 0, 170, 95, {}]], rings: [[520, 0, 70, '#ffd84a', 520, 4], [620, 0, 50, '#ffffff', 440, 3]] },
   };
-  function sigDraw(cv, now) {
-    const v = cv.dataset.v, P = SIG_SHOW[v], g = cv.getContext('2d'), t = now % P.len, GROUND = 124, cy = GROUND - 30, X = [96, 236];
-    g.imageSmoothingEnabled = false; g.clearRect(0, 0, 320, 180);
-    for (const x of X) { g.fillStyle = 'rgba(0,0,0,.35)'; g.beginPath(); g.ellipse(x, GROUND + 2, 18, 4, 0, 0, 7); g.fill(); }
-    if (t > 120 && t < 900) { g.fillStyle = 'rgba(0,0,0,.45)'; g.fillRect(0, 0, 320, 180); }  // la scène s'assombrit pendant l'attaque, comme dans l'Arène
+  // o (Sprite Lab) : { v, ground, X, flip } — seulement les effets, autour du héros qui se déplace ; t = ms depuis le début de l'attaque
+  function sigDraw(cv, now, o) {
+    const v = o?.v || cv.dataset.v, P = SIG_SHOW[v], g = cv.getContext('2d'), t = o ? now : now % P.len, W = cv.width, H = cv.height,
+      GROUND = o?.ground ?? 124, cy = GROUND - 30, X = o?.X || [96, 236];
+    g.imageSmoothingEnabled = false; g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, W, H);
+    if (!o) for (const x of X) { g.fillStyle = 'rgba(0,0,0,.35)'; g.beginPath(); g.ellipse(x, GROUND + 2, 18, 4, 0, 0, 7); g.fill(); }
+    if (!o && t > 120 && t < 900) { g.fillStyle = 'rgba(0,0,0,.45)'; g.fillRect(0, 0, W, H); }  // la scène s'assombrit pendant l'attaque, comme dans l'Arène
+    if (o?.flip) g.setTransform(-1, 0, 0, 1, 2 * X[0], 0);  // tourné vers la gauche : les effets en miroir autour de NeoMe
     const i = Math.floor(t / 110), body = pic(src(form().dossier + (i < 4 ? `attaque${cv.dataset.n}_droite_${i}.png` : 'droite_repos.png')));
-    if (body.complete) g.drawImage(body, X[0] - 32, GROUND - 62);
+    if (!o && body.complete) g.drawImage(body, X[0] - 32, GROUND - 62);
     const tg = pic(src(form().dossier + 'gauche_repos.png'));  // la cible : une silhouette, qui recule sous le coup
     if (tg.complete && v !== 'coquille') { g.save(); g.globalAlpha = .35; g.filter = 'brightness(0)'; g.drawImage(tg, X[1] - 32 + (t >= P.hitAt && t < P.hitAt + 300 ? 3 : 0), GROUND - 62); g.restore(); }
     for (const [x0, k, r1, c, ms, w] of P.rings) {  // les ondes de choc
@@ -517,7 +520,21 @@ export default async function (ctx) {
         g.globalCompositeOperation = 'source-over'; g.globalAlpha = 1;
       }
     }
-    if (t >= P.hitAt && t < P.hitAt + 90) { g.fillStyle = 'rgba(255,236,255,.35)'; g.fillRect(0, 0, 320, 180); }  // l'éclair du coup
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    if (t >= P.hitAt && t < P.hitAt + 90) { g.fillStyle = 'rgba(255,236,255,.35)'; g.fillRect(0, 0, W, H); }  // l'éclair du coup
+  }
+  // Sprite Lab : l'attaque signature joue autour du héros (calque à mi-résolution, donc NeoMe y fait 64 px comme dans l'Arène)
+  function heroSig(v, n) {
+    const cv = $('#heroSig'), w = $('#world'), t0 = performance.now();
+    cv.width = w.clientWidth / 2; cv.height = w.clientHeight / 2; cv.dataset.n = n; hero.sig = t0;
+    const step = now => {
+      if (hero.sig !== t0) return;
+      if (now - t0 > SIG_SHOW[v].len || S.tab !== 'lab' || !view.isConnected) { cv.width = cv.width; return; }
+      const x0 = (hero.x + 64) / 2;
+      sigDraw(cv, now - t0, { v, ground: hero.y / 2 + 62, X: [x0, x0 + 140], flip: hero.d === 'gauche' });
+      requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
   }
   function sigLoop() {
     if (S.sigRun) return; S.sigRun = true;
@@ -767,7 +784,10 @@ export default async function (ctx) {
     if (!view.isConnected) { removeEventListener('keydown', onKey, true); removeEventListener('keyup', onUp, true); return; }
     if (S.tab !== 'lab' || /INPUT|TEXTAREA/.test(document.activeElement?.tagName)) return;
     if (KEYS[e.key]) { hero.keys.add(e.key); e.preventDefault(); }
-    if (/^[1-4]$/.test(e.key) && !hero.atk && S.cr?.attack_fx?.[e.key]) { hero.atk = +e.key; hero.atkI = 0; e.preventDefault(); }
+    if (/^[1-4]$/.test(e.key) && !hero.atk && S.cr?.attack_fx?.[e.key]) {
+      hero.atk = +e.key; hero.atkI = 0; e.preventDefault();
+      const sv = sigOf(atkMoves()[hero.atk - 1] || {}); if (sv) heroSig(sv, hero.atk);
+    }
     if (e.ctrlKey && e.key.toLowerCase() === 'z') { undo(); e.preventDefault(); }
     if (e.ctrlKey && e.key.toLowerCase() === 'y') { redo(); e.preventDefault(); }
   };

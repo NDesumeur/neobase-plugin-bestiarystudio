@@ -187,6 +187,7 @@
 
 /* attaques : aperçu par direction, et l'effet posé devant la créature dans l'aperçu en jeu */
 .nbs-world .fx { position: absolute; width: 128px; height: 128px; image-rendering: pixelated; pointer-events: none; }
+.nbs-world .sig { position: absolute; inset: 0; width: 100%; height: 100%; image-rendering: pixelated; pointer-events: none; }
 .nbs-atk { margin-bottom: 12px; }
 .nbs-atk-t { color: var(--brass); text-shadow: 2px 2px 0 var(--ink0); margin-bottom: 6px; }
 .nbs-atk-row { display: flex; gap: 10px; flex-wrap: wrap; }

@@ -340,8 +340,25 @@ def render(client, model, prompt, seed, refs_img=(), cancel=lambda: False, **kw)
     return clean_cut(im) if kw.get("cut") else im
 
 
+# « supprime les cornes », « sans queue » : le modèle d'édition ajoute souvent au lieu d'enlever ; on lui dit clairement d'effacer
+_REMOVE = (r"^\s*(?:supprime[rz]?|enleve[rz]?|retire[rz]?|efface[rz]?|ote[rz]?|vire[rz]?|elimine[rz]?|fais disparaitre|sans|plus de|pas de)"
+           r"(?:-(?:le|la|les|lui))?\s+(.+)$")
+
+
+def removal(instruction):
+    """Ce qu'une retouche demande d'enlever (« supprime les cornes » -> « les cornes »), ou None."""
+    m = nb_core.re.match(_REMOVE, nb_core.fold(instruction))
+    return instruction.strip()[m.start(1):].strip(" .!") if m else None
+
+
 def edit_prompt(instruction, zone):
     where = "Edit only the marked area of this creature" if zone else "Edit this creature"
+    gone = removal(instruction)
+    if gone:
+        return (f"{where}: REMOVE this part completely: \"{gone}\". Erase it and fill the place where it was with the creature's "
+                "own body or the plain background, as if it had never existed. Do not add anything new. Keep everything else exactly "
+                "identical: same design, colors, proportions, pose, camera and pixel art style. Plain flat light gray background, "
+                "no cast shadow.")
     return (f"{where}: {instruction.strip()}. Keep everything else exactly identical: same design, colors, "
             "proportions, pose, camera and pixel art style. Plain flat light gray background, no cast shadow.")
 
@@ -368,6 +385,9 @@ _FLIP = (r"\b(?:la )?tete en bas\b|\bsens dessus dessous\b|\b(?:les )?pattes en 
          r"|\ba l'envers (?:de haut en bas|verticalement)\b|\bretourne(?:e)? (?:de haut en bas|verticalement)\b")
 _MIRROR = (r"\bregarde (?:vers |a )?(?:la )?droite\b|\btourne(?:e)? vers la droite\b|\bla tete (?:a|vers la) droite\b"
            r"|\ben miroir\b|\bde l'autre cote\b|\bmauvais cote\b")
+# une demande de sens (gauche / droite) : un simple miroir, quelle que soit la vue, jamais une vue redessinée
+_HMIRROR = (r"\b(?:change[rz]? de|dans l'autre|l'autre|inverse[rz]? (?:la|le|sa|son)?) ?(?:sens|direction)\b|\bhorizontal(?:ement)?\b"
+            r"|\bsymetri\w*\b|\bmiroir\b|\bregard\w* (?:vers |a )?(?:la )?gauche\b|\btourne\w* vers la gauche\b|\bla tete (?:a|vers la) gauche\b")
 _ENVERS = r"\ba l'envers\b|\bretourne(?:e|-le|-la)?\b|\bdans le mauvais sens\b|\bdans l'autre sens\b|\binverse(?:e)?\b|\bmal oriente(?:e)?\b"
 _WANT = (r"(?:^|\bmais|\bdoit etre|\bdevrait etre|\bil faut (?:qu'(?:il|elle) soit|le mettre|la mettre)?|\bje (?:le |la )?veux"
          r"|\bremets?(?:-le|-la| le| la)?|\bmets?(?:-le|-la| le| la)?|\bplutot|\bpas de \w+ mais)\s*" + _O)
@@ -392,6 +412,7 @@ def orientation_fix(instruction, key):
         return found
     flip = bool(grab(_FLIP))
     mirror = bool(grab(_MIRROR))
+    hmirror = bool(grab(_HMIRROR))
     for m in grab(_WANT):
         want = m.group(1)
     for m in grab(_NOT):
@@ -406,6 +427,8 @@ def orientation_fix(instruction, key):
     exp = EXPECTED.get(key)
     if flip:
         action = "flip"
+    elif hmirror or (mirror and key != "gauche" and not wrong):
+        action = "mirror"
     elif key == "gauche":
         if wrong & {"face", "dos"} or (want == "profil" and not mirror):
             action = "regen"
