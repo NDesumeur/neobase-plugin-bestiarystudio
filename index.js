@@ -477,7 +477,52 @@ export default async function (ctx) {
     const box = $('#attacks'), moves = atkMoves();
     if (!S.cr || !moves.length || !form().fx?.['1']) { box.innerHTML = '<div class="nbs-hint">Les attaques arrivent avec la fiche du bestiaire.</div>'; return; }
     box.innerHTML = moves.map((a, k) => `<div class="nbs-atk"><div class="nbs-atk-t">${k + 1}. ${esc(a.nom)} <span class="nbs-hint">· ${esc(a.element)} · ${GENRE[a.genre] || esc(a.genre)}</span></div>
-      <div class="nbs-atk-row">${DIRS.map(d => `<canvas width="192" height="192" class="nbs-atk-cv nbs-well" data-n="${k + 1}" data-d="${d}"></canvas>`).join('')}</div></div>`).join('');
+      <div class="nbs-atk-row">${sigOf(a) ? `<canvas width="320" height="180" class="nbs-sig-cv nbs-well" data-n="${k + 1}" data-v="${sigOf(a)}" title="Comme dans l'Arène"></canvas>`
+        : DIRS.map(d => `<canvas width="192" height="192" class="nbs-atk-cv nbs-well" data-n="${k + 1}" data-d="${d}"></canvas>`).join('')}</div></div>`).join('');
+    if (box.querySelector('.nbs-sig-cv')) sigLoop();
+  }
+  /* NeoMe (n° 0) a ses attaques signature (dossier signature/ : planches de 10 images de 128 px, une ligne par temps : lancer, trajet, impact).
+     Rejouées ici avec la mise en scène et les tailles de l'Arène (scène 320 × 180, NeoMe en 64 px). */
+  const SIG = ['eclipse', 'regard', 'casque', 'coquille'];
+  const sigOf = a => S.cr?.slug === 'neome' && SIG.includes(a.visuel) ? a.visuel : '';
+  const SIG_SHOW = {  // parts : [début ms, ligne de la planche, 0 = sur NeoMe / 1 = sur la cible, taille, ms par image, options] ; rings : [début, où, rayon, couleur, ms, épaisseur]
+    eclipse: { len: 1700, hitAt: 520, parts: [[0, 0, 0, 210, 80, { dy: -8 }], [520, 2, 1, 180, 60, { dy: -4 }]], rings: [[480, 0, 320, '#ffd84a', 650, 6], [570, 0, 256, '#ff4fd8', 600, 4], [640, 0, 192, '#ffffff', 520, 3]] },
+    regard: { len: 1700, hitAt: 620, parts: [[0, 0, 0, 100, 45, { dx: 4, dy: -12 }], [420, 1, 0, 64, 40, { dx: 10, dy: -12, beam: true, until: 820 }], [510, 2, 1, 160, 55, { dy: -8 }]], rings: [[620, 1, 90, '#ffd84a', 480, 5]] },
+    casque: { len: 1900, hitAt: 780, parts: [[0, 0, 0, 160, 40, { dy: -6, until: 780 }], [360, 1, 0, 96, 50, { dx: 18, dy: -8, travel: 420, until: 780 }], [780, 2, 1, 190, 55, { dy: -6 }]], rings: [[0, 0, 70, '#ff4fd8', 480, 3], [110, 0, 90, '#5ef0ff', 480, 3], [220, 0, 110, '#ff4fd8', 480, 3], [780, 1, 110, '#5ef0ff', 520, 5], [860, 1, 80, '#ff4fd8', 480, 4]] },
+    coquille: { len: 1500, hitAt: 520, parts: [[0, 0, 0, 170, 95, {}]], rings: [[520, 0, 70, '#ffd84a', 520, 4], [620, 0, 50, '#ffffff', 440, 3]] },
+  };
+  function sigDraw(cv, now) {
+    const v = cv.dataset.v, P = SIG_SHOW[v], g = cv.getContext('2d'), t = now % P.len, GROUND = 124, cy = GROUND - 30, X = [96, 236];
+    g.imageSmoothingEnabled = false; g.clearRect(0, 0, 320, 180);
+    for (const x of X) { g.fillStyle = 'rgba(0,0,0,.35)'; g.beginPath(); g.ellipse(x, GROUND + 2, 18, 4, 0, 0, 7); g.fill(); }
+    if (t > 120 && t < 900) { g.fillStyle = 'rgba(0,0,0,.45)'; g.fillRect(0, 0, 320, 180); }  // la scène s'assombrit pendant l'attaque, comme dans l'Arène
+    const i = Math.floor(t / 110), body = pic(src(form().dossier + (i < 4 ? `attaque${cv.dataset.n}_droite_${i}.png` : 'droite_repos.png')));
+    if (body.complete) g.drawImage(body, X[0] - 32, GROUND - 62);
+    const tg = pic(src(form().dossier + 'gauche_repos.png'));  // la cible : une silhouette, qui recule sous le coup
+    if (tg.complete && v !== 'coquille') { g.save(); g.globalAlpha = .35; g.filter = 'brightness(0)'; g.drawImage(tg, X[1] - 32 + (t >= P.hitAt && t < P.hitAt + 300 ? 3 : 0), GROUND - 62); g.restore(); }
+    for (const [x0, k, r1, c, ms, w] of P.rings) {  // les ondes de choc
+      const u = (t - x0) / ms; if (u < 0 || u > 1) continue;
+      const r = 4 + (r1 - 4) * (1 - (1 - u) ** 3);
+      g.strokeStyle = c; g.globalAlpha = 1 - u; g.lineWidth = w; g.beginPath(); g.ellipse(X[k], cy - 6, r, r * .55, 0, 0, 7); g.stroke(); g.globalAlpha = 1;
+    }
+    const sheet = pic(src('signature/' + v + '.png'));
+    if (sheet.complete) for (const [t0, row, at, size, ms, o] of P.parts) {
+      const dt = t - t0; if (dt < 0 || (o.until && t >= o.until)) continue;
+      const loop = o.beam || o.travel, f = loop ? Math.floor(dt / ms) % 10 : Math.floor(dt / ms); if (f > 9) continue;
+      const k = o.travel ? Math.min(1, dt / o.travel) : 0, x = X[at] + (o.dx || 0) + (X[1] - X[at] - (o.dx || 0)) * k, y = cy + (o.dy || 0);
+      for (const glow of [0, 1]) {  // l'effet, puis son halo (couleurs additionnées)
+        if (glow) { g.globalCompositeOperation = 'lighter'; g.globalAlpha = .55; }
+        if (o.beam) g.drawImage(sheet, f * 128, row * 128, 128, 128, x, y - size / 2, X[1] - x - 10, size);
+        else g.drawImage(sheet, f * 128, row * 128, 128, 128, Math.round(x - size / 2), Math.round(y - size / 2), size, size);
+        g.globalCompositeOperation = 'source-over'; g.globalAlpha = 1;
+      }
+    }
+    if (t >= P.hitAt && t < P.hitAt + 90) { g.fillStyle = 'rgba(255,236,255,.35)'; g.fillRect(0, 0, 320, 180); }  // l'éclair du coup
+  }
+  function sigLoop() {
+    if (S.sigRun) return; S.sigRun = true;
+    const step = now => { const cvs = $$('.nbs-sig-cv'); if (!cvs.length || !view.isConnected) { S.sigRun = false; return; } if (S.tab === 'dirs') cvs.forEach(cv => sigDraw(cv, now)); requestAnimationFrame(step); };
+    requestAnimationFrame(step);
   }
   function drawAttack(cv, n, d, i) {
     const f = atkFrame(n, d, i), g = cv.getContext('2d');

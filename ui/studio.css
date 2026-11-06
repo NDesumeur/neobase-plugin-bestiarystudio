@@ -191,6 +191,7 @@
 .nbs-atk-t { color: var(--brass); text-shadow: 2px 2px 0 var(--ink0); margin-bottom: 6px; }
 .nbs-atk-row { display: flex; gap: 10px; flex-wrap: wrap; }
 .nbs-atk-cv { width: 192px; height: 192px; image-rendering: pixelated; }
+.nbs-sig-cv { width: 640px; max-width: 100%; aspect-ratio: 16 / 9; image-rendering: pixelated; }
 
 /* fiche : bloc combat */
 .nbs-combat { margin-top: 12px; padding-top: 10px; border-top: 4px solid var(--parch2); }
