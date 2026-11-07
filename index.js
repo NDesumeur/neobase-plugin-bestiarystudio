@@ -47,6 +47,10 @@ const HTML = `<link rel="stylesheet" href="${U}ui/studio.css">
             <button class="nbs-btn dark sm" data-t="animaux">Animaux</button>
             <button class="nbs-btn dark sm" data-t="monstres">Monstres</button>
             <button class="nbs-btn dark sm" data-t="folklore">Folklore</button>
+            <button class="nbs-btn dark sm" data-t="yokai">Yokai</button>
+            <button class="nbs-btn dark sm" data-t="jeux">Jeux</button>
+            <button class="nbs-btn dark sm" data-t="anime">Anime</button>
+            <button class="nbs-btn dark sm" data-t="objets">Objets vivants</button>
             <button class="nbs-btn sm" id="inspire" style="margin-left:auto">${ic('etoile')}Inspire-moi</button>
           </div>
           <span class="nbs-hint" id="inspireMsg"></span>
@@ -83,6 +87,7 @@ const HTML = `<link rel="stylesheet" href="${U}ui/studio.css">
       </div>
       <div class="nbs-cols" id="mkOther" hidden>
         <div class="grow">
+          <div class="nbs-row"><button class="nbs-btn sm" id="mkInspire">${ic('etoile')}Inspire-moi</button><span class="nbs-hint" id="mkInspireMsg">une idée qui va avec tes choix ci-dessous</span></div>
           <div class="nbs-title">Nom</div>
           <div class="nbs-parch"><input type="text" id="mkName" maxlength="60" spellcheck="false"></div>
           <div class="nbs-sep"></div>
@@ -390,7 +395,7 @@ export default async function (ctx) {
     });
     busy(false);
     if (j.error) { out.say(j.error, true); return null; }
-    if (j.kind.startsWith('make-')) { out.say({ 'make-objet': 'Objet créé ✓', 'make-attaque': 'Attaque créée ✓', 'make-musique': 'Musique composée ✓' }[j.kind]); return j; }
+    if (j.kind.startsWith('make-')) { S.moves = null; out.say({ 'make-objet': 'Objet créé ✓', 'make-attaque': 'Attaque créée ✓', 'make-musique': 'Musique composée ✓' }[j.kind]); return j; }
     say(j.kind === 'sketch' ? 'Choisis ton design ↓' : j.kind === 'edit' ? 'Retouche faite ✓ (nouvelle version)'
       : j.kind === 'portrait' ? 'Portrait de combat prêt ✓ (onglet Directions, fiche)'
       : j.kind === 'illustration' ? 'Image du bestiaire prête ✓ (onglet Directions, fiche)' : 'Créature invoquée ✓');
@@ -503,7 +508,7 @@ export default async function (ctx) {
       const cv = $('.nbs-mk-cv'), it = S.item;
       if (!cv || !view.isConnected || it?.kind !== 'attaque') { S.mkRun = false; return; }
       const sig = it.source === 'signature', show = sig ? SIG_SHOW[it.visuel] : it.show;  // une signature : sa planche et sa mise en scène de l'Arène
-      if (S.tab === 'creer') sigDraw(cv, now % show.len, { show, sheet: sig ? `${U}lib/${encodeURIComponent(it.creature)}/signature/${it.visuel}.png` : mkUrl('attaque', it, it.source === 'catalogue' ? '_planche.png' : '/planche.png'), X: [96, 236], ground: 124 });
+      if (S.tab === 'creer') sigDraw(cv, now % show.len, { show, sheet: sig ? `${U}lib/${encodeURIComponent(it.creature)}/signature/${it.visuel}.png` : mkUrl('attaque', it, it.source === 'catalogue' ? '_anim5.png' : '/planche.png'), X: [96, 236], ground: 124 });
       requestAnimationFrame(step);
     };
     requestAnimationFrame(step);
@@ -542,6 +547,18 @@ export default async function (ctx) {
   });
   $('#crType').innerHTML = `<option value="">Auto (les types rares d'abord)</option>` + ELEMS.map(t => `<option value="${t}">${t}</option>`).join('');
   $('#crType').onchange = () => { S.idType = ''; };
+  $('#mkInspire').onclick = async () => {
+    const b = $('#mkInspire'), msg = $('#mkInspireMsg');
+    b.disabled = true; msg.textContent = 'La plume réfléchit…';
+    try {
+      const i = await post('/inspire-item', { kind: S.kind, categorie: $('#mkCat').value, rarete: $('#mkRar').value, element: $('#mkElem').value,
+        genre: $('#mkGenre').value, tempo: $('#mkTempo').value, ambiance: $('#mkMood').value });
+      if (i.name) $('#mkName').value = i.name;
+      $('#mkDesc').value = i.description;
+      msg.textContent = 'Idée prête : retouche-la si tu veux, puis Créer.';
+    } catch (e) { msg.textContent = e.message; }
+    b.disabled = false;
+  };
   $('#inspire').onclick = async () => {
     const b = $('#inspire'), msg = $('#inspireMsg');
     b.disabled = true; msg.textContent = 'La plume réfléchit… (une minute la première fois)';
@@ -645,8 +662,9 @@ export default async function (ctx) {
     const types = hand ? `<div class="nbs-combat-head"><span class="nbs-hint">Types</span> ${tsel('typeSel1', ts[0])} ${tsel('typeSel2', ts[1] || '', true)}</div>` : '';
     const top = Math.min(4, RAR.indexOf(k.rarete) + 2), ok = m => RAR.indexOf(m.rarete) <= top;  // jusqu'à 2 crans au-dessus de la créature
     const msel = (a, i) => !hand || !S.moves ? '' : `<select class="nbs-rarsel nbs-movesel" data-i="${i}" title="Changer cette attaque">
-        <option value="">changer…</option>${ELEMS.map(e => `<optgroup label="${e}">${S.moves.filter(m => m.element === e && ok(m)).map(m =>
-          `<option value="${m.id}"${m.id === a.id ? ' selected' : ''}>${esc(m.nom)} · ${GENRE[m.genre] || m.genre} · ${m.rarete}</option>`).join('')}</optgroup>`).join('')}</select>`;
+        <option value="">changer…</option>${S.moves.some(m => m.cree && ok(m)) ? `<optgroup label="Mes attaques">${S.moves.filter(m => m.cree && ok(m)).map(m =>
+          `<option value="${m.id}"${'mk:' + a.cree === m.id ? ' selected' : ''}>${esc(m.nom)} · ${m.element} · ${m.rarete}</option>`).join('')}</optgroup>` : ''}${ELEMS.map(e => `<optgroup label="${e}">${S.moves.filter(m => m.element === e && !m.cree && ok(m)).map(m =>
+          `<option value="${m.id}"${!a.cree && m.id === a.id ? ' selected' : ''}>${esc(m.nom)} · ${GENRE[m.genre] || m.genre} · ${m.rarete}</option>`).join('')}</optgroup>`).join('')}</select>`;
     return `<div class="nbs-combat">${portrait ? `<div class="nbs-fiche-pic nbs-well nbs-combat-pic"><img src="${portrait}" alt="" title="Portrait de combat"></div>` : ''}<div class="nbs-combat-head"><span class="nbs-rare r${RAR.indexOf(k.rarete)}">${esc(k.rarete)}</span>${k.rarete_fixe ? ' <span class="nbs-pow">🔒</span>' : ''} ${rar}</div>${types}
       <div class="nbs-statgrid">${Object.entries(STAT).map(([key, label]) => `<span>${label}</span><i><b style="width:${Math.min(100, k.stats[key])}%"></b></i><em>${k.stats[key]}</em>`).join('')}</div>
       <div class="nbs-read nbs-weak"><b>Faible contre</b> ${chips(k.faiblesses.map(e => e + xm(k, e)), 'bad')} &nbsp; <b>Résiste à</b> ${chips(k.resistances.map(e => e + xm(k, e)), 'good')}${(k.immunites || []).length ? ` &nbsp; <b>Immunisé contre</b> ${chips(k.immunites, 'good')}` : ''}</div>
@@ -665,7 +683,7 @@ export default async function (ctx) {
     const box = $('#attacks'), moves = atkMoves();
     if (!S.cr || !moves.length || !form().fx?.['1']) { box.innerHTML = '<div class="nbs-hint">Les attaques arrivent avec la fiche du bestiaire.</div>'; return; }
     box.innerHTML = moves.map((a, k) => `<div class="nbs-atk"><div class="nbs-atk-t">${k + 1}. ${esc(a.nom)} <span class="nbs-hint">· ${esc(a.element)} · ${GENRE[a.genre] || esc(a.genre)}</span></div>
-      <div class="nbs-atk-row">${sigOf(a) ? `<canvas width="320" height="180" class="nbs-sig-cv nbs-well" data-n="${k + 1}" data-v="${sigOf(a)}" title="Comme dans l'Arène"></canvas>`
+      <div class="nbs-atk-row">${sigOf(a) || a.cree && a.show ? `<canvas width="320" height="180" class="nbs-sig-cv nbs-well" data-n="${k + 1}" data-v="${sigOf(a)}" data-cree="${a.cree && a.show ? k : ''}" title="Comme dans l'Arène"></canvas>`
         : DIRS.map(d => `<canvas width="192" height="192" class="nbs-atk-cv nbs-well" data-n="${k + 1}" data-d="${d}"></canvas>`).join('')}</div></div>`).join('');
     if (box.querySelector('.nbs-sig-cv')) sigLoop();
   }
@@ -681,7 +699,8 @@ export default async function (ctx) {
   };
   // o (Sprite Lab) : { v, ground, X, flip } — seulement les effets, autour du héros qui se déplace ; t = ms depuis le début de l'attaque
   function sigDraw(cv, now, o) {
-    const v = o?.v || cv.dataset.v, P = o?.show || SIG_SHOW[v], g = cv.getContext('2d'), t = o ? now : now % P.len, W = cv.width, H = cv.height,
+    const mk = !o && cv.dataset.cree !== '' && cv.dataset.cree != null ? atkMoves()[+cv.dataset.cree] : null;  // une attaque créée
+    const v = o?.v || cv.dataset.v, P = o?.show || mk?.show || SIG_SHOW[v], g = cv.getContext('2d'), t = o ? now : now % P.len, W = cv.width, H = cv.height,
       GROUND = o?.ground ?? 124, cy = GROUND - 30, X = o?.X || [96, 236];
     g.imageSmoothingEnabled = false; g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, W, H);
     if (!o) for (const x of X) { g.fillStyle = 'rgba(0,0,0,.35)'; g.beginPath(); g.ellipse(x, GROUND + 2, 18, 4, 0, 0, 7); g.fill(); }
@@ -697,12 +716,12 @@ export default async function (ctx) {
       const r = 4 + (r1 - 4) * (1 - (1 - u) ** 3);
       g.strokeStyle = c; g.globalAlpha = 1 - u; g.lineWidth = w; g.beginPath(); g.ellipse(X[k], cy - 6, r, r * .55, 0, 0, 7); g.stroke(); g.globalAlpha = 1;
     }
-    const sheet = pic(o?.sheet || src('signature/' + v + '.png'));
+    const sheet = pic(o?.sheet || (mk ? mkUrl('attaque', { slug: mk.cree }, '/planche.png') : src('signature/' + v + '.png')));
     if (sheet.complete) for (const [t0, row, at, size, ms, o] of P.parts) {
       const dt = t - t0; if (dt < 0 || (o.until && t >= o.until)) continue;
       const loop = o.beam || o.travel, f = loop ? Math.floor(dt / ms) % 10 : Math.floor(dt / ms); if (f > 9) continue;
       const k = o.travel ? Math.min(1, dt / o.travel) : 0, x = X[at] + (o.dx || 0) + (X[1] - X[at] - (o.dx || 0)) * k, y = cy + (o.dy || 0);
-      for (const glow of [0, 1]) {  // l'effet, puis son halo (couleurs additionnées)
+      for (const glow of mk || o?.sheet ? [0] : [0, 1]) {  // l'effet, puis son halo (couleurs additionnées) ; pas pour une planche créée ou du catalogue
         if (glow) { g.globalCompositeOperation = 'lighter'; g.globalAlpha = .55; }
         if (o.beam) g.drawImage(sheet, f * 128, row * 128, 128, 128, x, y - size / 2, X[1] - x - 10, size);
         else g.drawImage(sheet, f * 128, row * 128, 128, 128, Math.round(x - size / 2), Math.round(y - size / 2), size, size);
@@ -1228,6 +1247,11 @@ export default async function (ctx) {
         
         <div class="nbs-title" style="margin-top:14px">Types</div>
         <div class="nbs-eqtypes">${B.types.map(t => `<span class="nbs-eqtype${t.n ? '' : ' none'}"><b>${t.n}</b>${esc(t.type)}</span>`).join('')}</div>
+        ${B.attaques?.total ? `<div class="nbs-title" style="margin-top:14px">Raretés des attaques · ${B.attaques.total}</div>
+        <div class="nbs-eqbars">${B.attaques.raretes.map((r, i) => `<span class="nbs-rare r${i}">${esc(r.nom)}</span>
+          <i><b class="r${i}" style="width:${Math.round(100 * r.n / B.attaques.total)}%"></b></i><em>${r.n} · ${Math.round(100 * r.n / B.attaques.total)} %</em>`).join('')}</div>
+        <div class="nbs-title" style="margin-top:14px">Gestes</div>
+        <div class="nbs-eqtypes">${B.attaques.gestes.map(g => `<span class="nbs-eqtype${g.n ? '' : ' none'}"><b>${g.n}</b>${esc(GENRE[g.genre] || g.genre)}</span>`).join('')}</div>` : ''}
         <div class="nbs-title" style="margin-top:14px">Moyennes</div>
         <div class="nbs-eqavg">${Object.entries(STAT).map(([k, l]) => `<span><b>${B.moyennes[k]}</b>${l}</span>`).join('')}</div>
       </div>

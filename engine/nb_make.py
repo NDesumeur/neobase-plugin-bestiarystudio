@@ -55,7 +55,8 @@ def load(root, kind, slug):
     f = folder(root, kind) / slug / "item.json"
     if not f.is_file():
         raise ValueError("Création introuvable.")
-    return json.loads(f.read_text(encoding="utf-8"))
+    rec = json.loads(f.read_text(encoding="utf-8"))
+    return _fresh(rec) if kind == "attaque" else rec
 
 
 def save(root, kind, slug, rec):
@@ -74,7 +75,7 @@ def items(root, kind):
             rec = json.loads(f.read_text(encoding="utf-8"))
         except ValueError:
             continue
-        out.append(dict(rec, slug=d.name, kind=kind))
+        out.append(dict(_fresh(rec) if kind == "attaque" else rec, slug=d.name, kind=kind))
     return out
 
 
@@ -172,24 +173,33 @@ def sheet_rows(genre, cast, hit):
                     for i in range(N)]
         else:
             row1 = [_put(cast, .5 + .05 * math.sin(i), rot=i * 36) for i in range(N)]
-        row2 = [_put(hit, .35 + .7 * _ease(k), rot=i * 6, alpha=1 - max(0, (k - .55) / .45) ** 1.5, bright=1.25) for i, k in enumerate(t)]
+        row2 = [_put(hit, .25 + .45 * _ease(k), rot=i * 6, alpha=1 - max(0, (k - .55) / .45) ** 1.5, bright=1.25) for i, k in enumerate(t)]
         return row0, row1, row2
     row2 = [_stack(_put(cast, .5 + .4 * _ease(min(1, k * 2)), rot=-20 + 8 * i, alpha=1 - k),  # contact : la frappe puis l'éclat
-                   _put(hit, .3 + .6 * _ease(k), alpha=1 - k ** 2, bright=1.2)) for i, k in enumerate(t)]
+                   _put(hit, .25 + .45 * _ease(k), alpha=1 - k ** 2, bright=1.2)) for i, k in enumerate(t)]
     return blank, blank, row2
 
 
 def show(genre, color):
-    """La mise en scène (même format que celle de NeoMe dans le Studio) : [début ms, ligne, 0 lanceur / 1 cible, taille, ms par image, options]."""
+    """La mise en scène (même format que celle de NeoMe dans le Studio) : [début ms, ligne, 0 lanceur / 1 cible, taille, ms par image, options].
+    Taille C : la planche à sa taille réelle, jamais étirée (sinon les pixels bavent)."""
     if genre in SELF:
-        return dict(len=1600, hitAt=480, parts=[[0, 0, 0, 180, 90, {}]], rings=[[480, 0, 80, color, 520, 4]])
+        return dict(len=1600, hitAt=480, parts=[[0, 0, 0, C, 90, {}]], rings=[[480, 0, 50, color, 520, 3]])
     if genre in ("rayon", "souffle"):
-        return dict(len=1700, hitAt=620, parts=[[0, 0, 0, 90, 45, {"dx": 4, "dy": -10}], [420, 1, 0, 64, 40, {"dx": 12, "dy": -10, "beam": True, "until": 820}],
-                                                 [520, 2, 1, 160, 55, {"dy": -6}]], rings=[[620, 1, 90, color, 480, 5]])
+        return dict(len=1700, hitAt=620, parts=[[0, 0, 0, C, 45, {"dx": 4, "dy": -10}], [420, 1, 0, C // 2, 40, {"dx": 12, "dy": -10, "beam": True, "until": 820}],
+                                                 [520, 2, 1, C, 55, {"dy": -6}]], rings=[[620, 1, 55, color, 480, 3]])
     if genre in TRAVEL:
-        return dict(len=1900, hitAt=780, parts=[[0, 0, 0, 90, 40, {"dy": -8, "until": 420}], [360, 1, 0, 80, 50, {"dx": 18, "dy": -8, "travel": 420, "until": 780}],
-                                                 [780, 2, 1, 170, 55, {"dy": -6}]], rings=[[780, 1, 100, color, 520, 5]])
-    return dict(len=1500, hitAt=320, parts=[[200, 2, 1, 170, 55, {"dy": -6}]], rings=[[320, 1, 90, color, 480, 5]])
+        return dict(len=1900, hitAt=780, parts=[[0, 0, 0, C, 40, {"dy": -8, "until": 420}], [360, 1, 0, C, 50, {"dx": 18, "dy": -8, "travel": 420, "until": 780}],
+                                                 [780, 2, 1, C, 55, {"dy": -6}]], rings=[[780, 1, 60, color, 520, 3]])
+    return dict(len=1500, hitAt=320, parts=[[200, 2, 1, C, 55, {"dy": -6}]], rings=[[320, 1, 55, color, 480, 3]])
+
+
+def _fresh(rec):
+    """Une attaque créée avant ces réglages : sa mise en scène recalculée (tailles nettes)."""
+    import nb_attack
+    if rec.get("genre") in nb_moves.GENRES and rec.get("element") in nb_attack.PALETTE:
+        rec["show"] = show(rec["genre"], nb_attack.PALETTE[rec["element"]][2])
+    return rec
 
 
 def make_attack(eng, client, root, rec, seed, progress, cancel):
@@ -265,12 +275,37 @@ def catalog_sheet(root, e, g):
     import nb_attack
     if (e, g) not in nb_moves.CATALOG:
         raise ValueError("Attaque inconnue.")
-    f = folder(root, "attaque") / "_catalogue" / f"{e}_{g}_planche.png"
+    f = folder(root, "attaque") / "_catalogue" / f"{e}_{g}_anim5.png"
     if not f.is_file():
         f.parent.mkdir(parents=True, exist_ok=True)
-        fr = [x for x in (nb_attack._effect(g, e, i) for i in range(4)) if x is not None and x.getbbox()]
-        fr = fr or [Image.new("RGBA", (8, 8))]
-        _sheet(g, _square(fr[min(1, len(fr) - 1)]), _square(fr[min(2, len(fr) - 1)])).save(f, optimize=True)
+        fr = [nb_attack._effect(g, e, i) for i in range(4)]
+        if g in TRAVEL:  # les effets du jeu partent vers le bas : ici, de profil, vers la cible à droite
+            fr = [nb_attack._orient(x, "droite") for x in fr]
+        fr = [x if x is not None and x.getbbox() else None for x in fr]
+        if not any(fr):
+            fr = [Image.new("RGBA", (8, 8))] * 4
+        fr = [x or next(y for y in fr if y) for x in fr]
+
+        def cell(im, fade=1.):  # l'effet centré (sur ses pixels bien visibles) dans une case de C px, à la taille du jeu
+            bb = im.getchannel("A").point(lambda v: 255 if v > 60 else 0).getbbox()
+            sq = _square(im.crop(bb) if bb else im)
+            if fade < 1:
+                sq.putalpha(sq.getchannel("A").point(lambda v: int(v * fade)))
+            out = Image.new("RGBA", (C, C))
+            out.alpha_composite(sq, ((C - sq.width) // 2, (C - sq.height) // 2))
+            return out
+        play = [cell(fr[0]), cell(fr[0]), cell(fr[1]), cell(fr[1]), cell(fr[2]), cell(fr[2]), cell(fr[3]), cell(fr[3]),
+                cell(fr[3], .6), cell(fr[3], .3)]
+        hit = [cell(fr[2]), cell(fr[2]), cell(fr[2]), cell(fr[3]), cell(fr[3]), cell(fr[3]), cell(fr[3], .8), cell(fr[3], .6),
+               cell(fr[3], .4), cell(fr[3], .2)]
+        blank = [Image.new("RGBA", (C, C))] * N
+        rows = (play, blank, blank) if g in SELF else \
+               (play[:4] * 2 + play[2:4], [cell(fr[1]) for i in range(N)], hit) if g in TRAVEL else (blank, blank, hit)
+        sheet = Image.new("RGBA", (N * C, 3 * C))
+        for r, row in enumerate(rows):
+            for i, im in enumerate(row):
+                sheet.alpha_composite(im, (i * C, r * C))
+        sheet.save(f, optimize=True)
     return f
 
 

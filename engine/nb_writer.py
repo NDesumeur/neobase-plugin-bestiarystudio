@@ -33,7 +33,38 @@ THEMES = {
         "renard à plusieurs queues", "esprit de la forêt", "dame blanche", "korrigan", "vouivre", "tarasque",
         "kappa des rivières", "tengu", "wendigo", "lutin", "farfadet", "sirène des lacs", "cerf spectral",
         "dragon serpent d'Asie", "oiseau de feu", "chat-garou", "chien noir des landes", "golem d'argile",
-        "esprit des marais", "gardien de pierre", "baba yaga", "lycanthrope", "fée des champignons"]),
+        "esprit des marais", "gardien de pierre", "baba yaga", "lycanthrope", "fée des champignons",
+        "oiseau-tonnerre", "serpent à plumes", "lion-chien gardien de temple", "garuda", "naga", "djinn de fumée",
+        "griffon", "kelpie cheval d'eau", "selkie phoque", "domovoï esprit du foyer", "rusalka", "bunyip des marais",
+        "taniwha gardien des eaux", "chupacabra", "qilin à écailles", "nian bête du nouvel an", "huli jing renarde",
+        "leshy gardien des bois", "anubis chacal", "sphinx", "scarabée sacré", "golem de boue des steppes"]),
+    "yokai": ("yokai et créatures du folklore japonais", [
+        "kitsune à neuf queues", "tanuki farceur", "kappa à la coupelle d'eau sur la tête", "tengu au long nez",
+        "karasu-tengu à tête de corbeau", "nekomata chat à deux queues", "bakeneko", "jorōgumo araignée", "nue chimère",
+        "baku mangeur de rêves", "kamaitachi belette aux faucilles", "rokurokubi au cou qui s'étire", "nurikabe mur vivant",
+        "ittan-momen bande de tissu volante", "umibōzu géant des mers", "yuki-onna des neiges", "oni cornu",
+        "komainu lion gardien", "tsuchinoko serpent trapu", "shachihoko poisson-tigre", "baku", "raijū bête de foudre",
+        "hitodama flamme d'âme", "zashiki-warashi", "namazu poisson-chat des séismes", "inugami chien esprit",
+        "ryū dragon des rivières", "yamata-no-orochi serpent à huit têtes", "amabie sirène à bec", "kodama esprit d'arbre"]),
+    "jeux": ("archétype de monstre de jeu vidéo (sans copier un monstre existant)", [
+        "slime gélatineux", "champignon qui marche", "chauve-souris des cavernes", "golem de cristal", "squelette archer",
+        "boss dragon cracheur de feu", "plante qui crache des graines", "fantôme timide", "chevalier de lave",
+        "bestiole mécanique à ressort", "robot gardien rouillé", "élémentaire de tempête", "ver des sables géant",
+        "carapace à pointes qui roule", "lapin piégé de dents", "œil volant", "méduse électrique", "golem de neige",
+        "familier de sorcière", "monture de chevalier", "bête de donjon enchaînée", "esprit de lanterne", "tortue-île",
+        "petit démon à fourche", "créature de poche à évolutions", "mangeur de pièces d'or"]),
+    "anime": ("archétype de créature d'anime (sans copier un personnage existant)", [
+        "bête-esprit gardienne", "mascotte ronde aux grandes oreilles", "familier magique ailé", "loup céleste géant",
+        "dragon serpent des nuages", "golem-mecha à moteur", "chat qui parle", "renard du sanctuaire", "esprit de la forêt géant",
+        "bestiole du cœur des machines", "monstre de couloir d'école", "créature des rêves en peluche", "titan de pierre",
+        "oiseau de feu immortel", "invocation en armure", "créature de l'au-delà au masque", "dévoreur d'ombres",
+        "gardien des bains", "poisson volant des cieux", "esprit de la tempête", "petit dragon de compagnie", "bête à cristal sur le front"]),
+    "objets": ("objet vivant ou monstre lié à un objet (mimique, tsukumogami)", [
+        "coffre mimique à dents", "lanterne en papier à langue", "parapluie à un œil et une jambe", "théière qui crache de la vapeur",
+        "armure vide hantée", "livre à crocs", "épée possédée", "miroir à visage", "horloge à pattes", "chandelier vivant",
+        "poupée de chiffon", "sandale de paille", "cloche de temple", "masque de théâtre", "bouteille à génie", "coussin qui respire",
+        "marionnette sans fils", "boîte à musique", "pot de terre à bras", "balai qui court", "casque de samouraï",
+        "dé à jouer géant", "chapeau de sorcier vorace", "sac à dos glouton", "lampe à huile", "bouclier à visage"]),
 }
 THEMES["melange"] = ("mélange libre de toutes ces sources", [w for _, ws in THEMES.values() for w in ws])
 
@@ -114,6 +145,43 @@ def idea(theme="melange", seed=None, typ=None):
     if not desc:
         raise WriterError("La plume n'a rien proposé, réessaie.")
     return dict(name=name, description=desc, theme=theme, type=typ)
+
+
+ITEM_SPARKS = {
+    "objet": ["un forgeron nain", "un temple englouti", "une sorcière des marais", "une étoile filante", "un dragon endormi",
+              "une fête de village", "un navire fantôme", "une bibliothèque oubliée", "un volcan", "un jardin japonais",
+              "un désert de verre", "une horloge cassée", "un renard à neuf queues", "une mine de cristal", "un roi déchu"],
+    "attaque": ["une tempête", "un essaim", "des chaînes", "un tourbillon", "des lames", "une explosion d'étoiles", "des racines",
+                "un cri", "un rayon jumeau", "des pétales", "des runes", "un serpent d'énergie", "une pluie de météores", "un miroir"],
+    "musique": ["une taverne", "une forêt la nuit", "un combat de boss", "une ville portuaire", "une grotte de cristal",
+                "un générique d'anime", "une course-poursuite", "un temple sous la neige", "un village au matin", "un désert",
+                "un vaisseau spatial", "une fête foraine", "un donjon", "les crédits de fin", "un marché japonais"],
+}
+SYS_ITEM = (
+    "Tu inventes des créations pour un jeu vidéo en pixel art. Tu écris en français. Ta description sert directement de "
+    "consigne à un générateur : CLAIRE, CONCRÈTE, en UNE phrase de 15 à 30 mots, sans histoire ni mots abstraits, sans nom "
+    "de jeu ou de personnage existant. Réponds uniquement en JSON.")
+
+
+def item_idea(kind, ctx=None, seed=None):
+    """{"name", "description"} : un objet, une attaque ou une musique inventée, qui va avec les choix du formulaire."""
+    seed = random.randrange(10 ** 6) if seed is None else int(seed)
+    ctx, spark = ctx or {}, random.Random(seed).choice(ITEM_SPARKS[kind])
+    what = {
+        "objet": f"un objet de catégorie « {ctx.get('categorie', 'objet')} », de rareté {ctx.get('rarete', 'commun')}. "
+                 "La description dit sa forme, sa matière, ses couleurs et un détail marquant, pour une icône",
+        "attaque": f"une attaque d'élément {ctx.get('element', 'feu')}, au geste « {ctx.get('genre', 'projectile')} ». "
+                   "La description dit à quoi ressemble l'énergie lancée puis l'impact (formes, couleurs, mouvement)",
+        "musique": f"une musique de jeu au tempo {ctx.get('tempo', 'moyen')}, d'ambiance {ctx.get('ambiance', 'joyeuse')}. "
+                   "La description donne le style, les instruments principaux et l'énergie (ex. : « chiptune entraînante, "
+                   "basse pulsée, arpèges de synthé, batterie rapide »)",
+    }[kind]
+    out = _ask(SYS_ITEM, f"Invente {what}. Inspiration : {spark}.\nJSON avec exactement deux clés : \"nom\" (court, en "
+                         "français) et \"description\".", seed, temperature=0.95)
+    name, desc = _clean(out.get("nom"), 60), _clean(out.get("description"), 300)
+    if not desc:
+        raise WriterError("La plume n'a rien proposé, réessaie.")
+    return dict(name=name, description=desc)
 
 
 def fuse(a, b, seed=None):

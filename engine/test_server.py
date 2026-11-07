@@ -213,6 +213,9 @@ def main():
         assert c["variants"] == ["chromatique"] and not (Path(lib) / "creatures" / slug / "sprites/variantes/glace").exists()
         _, i = call(port, "/inspire", {"theme": "lovecraft"})
         assert i["description"], i
+        _, i = call(port, "/inspire-item", {"kind": "musique", "tempo": "rapide"})
+        assert i["description"], i
+        assert call(port, "/inspire-item", {"kind": "rien"})[0] == 400
         _, i = call(port, "/inspire", {"theme": "lovecraft", "type": "acier"})
         assert i["type"] == "acier", i
 

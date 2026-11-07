@@ -837,6 +837,17 @@ class Studio:
         self.build_attacks(slug)
         return self.creature(slug)
 
+    def _tech(self, move_id):
+        """(mécanique du catalogue, ce que l'attaque créée y ajoute) ; (None, {}) si l'attaque n'existe pas."""
+        if str(move_id).startswith("mk:"):
+            try:
+                it = nb_make.load(self.lib.root, "attaque", move_id[3:])
+            except ValueError:
+                return None, {}
+            return nb_moves.get(it.get("element"), it.get("genre")), dict(
+                nom=it.get("nom") or "", description=it.get("description", ""), cree=move_id[3:], show=it.get("show"))
+        return nb_moves.get(*(str(move_id).split(":") + [""])[:2]), {}
+
     def set_attack(self, slug, index, move_id=None):
         """L'attaque n° index remplacée par une du catalogue (« feu:souffle »), ou None : de nouveau celle de la plume."""
         rec = self.lib.load(slug)
@@ -847,7 +858,7 @@ class Studio:
         index = int(index)
         if not 0 <= index < len(rec["lore"]["combat"]["attaques"]):
             raise ValueError("Attaque inconnue.")
-        tech = nb_moves.get(*(move_id.split(":") + [""])[:2]) if move_id else None
+        tech = self._tech(move_id)[0] if move_id else None
         if move_id and tech is None:
             raise ValueError("Attaque inconnue.")
         rare = rec["lore"]["combat"]["rarete"]
@@ -864,8 +875,11 @@ class Studio:
         return self.creature(slug)
 
     def moves(self):
-        return [dict(id=m["id"], nom=m["nom"], element=m["element"], genre=m["genre"], rarete=m["rarete"], texte=nb_moves.describe(m))
-                for m in nb_moves.CATALOG.values()]
+        mine = [dict(id="mk:" + it["slug"], nom=it.get("nom") or it["slug"], element=it["element"], genre=it["genre"], cree=True,
+                     rarete=nb_moves.get(it["element"], it["genre"])["rarete"])
+                for it in nb_make.items(self.lib.root, "attaque") if nb_moves.get(it.get("element"), it.get("genre"))]
+        return mine + [dict(id=m["id"], nom=m["nom"], element=m["element"], genre=m["genre"], rarete=m["rarete"], texte=nb_moves.describe(m))
+                       for m in nb_moves.CATALOG.values()]
 
     def retype(self):
         """Créatures déjà faites : une sur deux reçoit un 2e type (sans réécrire la fiche), sa fiche de combat est recalculée."""
@@ -929,9 +943,11 @@ class Studio:
         k = nb_stats.card(rec["slug"], rec["lore"], brief.get("posture", ""), rec.get("rarete_fixe"),
                           self._prestiges(rec["slug"]), brief.get("anatomie", []))
         for i, mid in (rec.get("attaques_main") or {}).items():  # les attaques choisies à la main restent
-            tech, i = nb_moves.get(*(mid.split(":") + [""])[:2]), int(i)
+            (tech, extra), i = self._tech(mid), int(i)
             if tech and i < len(k["attaques"]) and not nb_stats.too_rare(tech["element"], tech["genre"], k["rarete"]):
-                k["attaques"][i] = nb_stats.move(rec["slug"], i, k["rarete"], len(k["attaques"]), tech["element"], tech["genre"])
+                k["attaques"][i] = nb_stats.move(rec["slug"], i, k["rarete"], len(k["attaques"]), tech["element"], tech["genre"],
+                                                 extra.get("nom"), extra.get("description", ""))
+                k["attaques"][i].update({x: extra[x] for x in ("cree", "show") if extra.get(x)})
         return k
 
     def set_rarity(self, slug, rarete=None):
@@ -962,7 +978,10 @@ class Studio:
                 continue
             rows.append(dict(slug=rec["slug"], nom=rec["name"], type=rec["lore"].get("type"), rarete=card["rarete"],
                              total=sum(card["stats"].values()), stats=card["stats"], prestige=rec["lore"].get("prestige"),
-                             fixe=bool(rec.get("rarete_fixe")), variantes=len(rec.get("variants", []))))
+                             fixe=bool(rec.get("rarete_fixe")), variantes=len(rec.get("variants", [])),
+                             unique=rec.get("rarete_fixe") == nb_stats.UNIQUE,
+                             attaques=[(a.get("rarete") or (nb_moves.get(*(str(a.get("id", ":")).split(":") + [""])[:2]) or {}).get("rarete"),
+                                        a.get("genre")) for a in card.get("attaques", [])]))
         n = len(rows)
         weights = sum(nb_stats.WEIGHTS)
         rare = [dict(nom=r, n=sum(x["rarete"] == r for x in rows), attendu=round(100 * w / weights))
@@ -1000,7 +1019,26 @@ class Studio:
         if old:
             alerts.append(f"{old} fiche{'s' if old > 1 else ''} sans prestige (rareté tirée au sort) : « Réécrire la fiche » "
                           "la rend fidèle à la créature.")
-        return dict(total=n, raretes=rare, types=types, moyennes=avg, creatures=rows, alertes=alerts, conseils=tips)
+        # les attaques (NeoMe à part : les siennes sont « ??? ») : raretés, gestes, et ce qui manque
+        atk = [a for x in rows if not x["unique"] for a in x["attaques"]]
+        arar = [dict(nom=r, n=sum(a[0] == r for a in atk)) for r in nb_moves.RARETES]
+        gestes = sorted(({"genre": g, "n": sum(a[1] == g for a in atk)} for g in nb_moves.GENRES), key=lambda g: -g["n"])
+        plain = [x for x in rows if not x["unique"] and x["attaques"] and all(a[0] == "commun" for a in x["attaques"])]
+        if len(atk) >= 8:
+            m = sum(not x["unique"] for x in rows)
+            if m and len(plain) / m > .3:
+                alerts.append(f"{round(100 * len(plain) / m)} % des créatures n'ont que des attaques communes ({len(plain)} sur {m}).")
+            none = [g["genre"] for g in gestes if not g["n"]]
+            if none:
+                alerts.append("Aucune créature n'a de " + ", ".join(none) + ".")
+            if gestes[0]["n"] / len(atk) > .2:
+                alerts.append(f"Beaucoup d'attaques {gestes[0]['genre']} ({round(100 * gestes[0]['n'] / len(atk))} % des attaques).")
+            if not arar[-1]["n"]:
+                alerts.append("Aucune attaque légendaire dans le bestiaire.")
+        for x in rows:
+            del x["attaques"], x["unique"]
+        return dict(total=n, raretes=rare, types=types, moyennes=avg, creatures=rows, alertes=alerts, conseils=tips,
+                    attaques=dict(total=len(atk), raretes=arar, gestes=gestes))
 
     def _free_gpu(self):
         """Le modèle d'image et celui de texte se partagent la carte : on demande à ComfyUI de libérer la mémoire."""
@@ -1012,6 +1050,13 @@ class Studio:
             urllib.request.urlopen(req, timeout=10).read()
         except Exception:
             pass
+
+    def inspire_item(self, b):
+        if b.get("kind") not in ("objet", "attaque", "musique"):
+            raise ValueError("Création inconnue.")
+        if not self.jobs.get()["running"]:
+            self._free_gpu()
+        return self.writer.item_idea(b["kind"], b, b.get("seed"))
 
     def inspire(self, theme, seed=None, typ=None):
         if not self.jobs.get()["running"]:
@@ -1458,6 +1503,12 @@ class Studio:
             return
         lore = rec.get("lore") or {}
         sd = self.lib.sprites_dir(slug)
+        for f in forms:
+            for n, a in enumerate(f["combat"]["attaques"], 1):
+                src = nb_make.folder(self.lib.root, "attaque") / str(a.get("cree", "")) / "planche.png"
+                if a.get("cree") and src.is_file():
+                    shutil.copyfile(src, self.lib.dir(slug) / f["dossier"] / f"planche{n}.png")
+                    a["planche"] = f"planche{n}.png"
         meta = dict(
             format=1, slug=slug, nom=rec["name"], type=lore.get("type"), espece=lore.get("espece"),
             description=lore.get("description", ""), mis_a_jour=rec.get("updated", 0), case=CELL, directions=list(DIRS),
@@ -1630,6 +1681,7 @@ def make_handler(studio, token):
         "/cutout": lambda b: studio.cutout(b["slug"], b["key"], b["mask"]),
         "/edit": lambda b: dict(job=studio.edit(b["slug"], b["key"], b.get("instruction"), b.get("zone"), b.get("index"))),
         "/inspire": lambda b: studio.inspire(b.get("theme"), b.get("seed"), b.get("type")),
+        "/inspire-item": lambda b: studio.inspire_item(b),
         "/lore": lambda b: studio.write_lore(b["slug"]),
         "/choose": lambda b: studio.choose(b["slug"], b["key"], b.get("delta"), b.get("index")),
         "/lab": lambda b: studio.set_lab(b["slug"], b.get("opts", {})),

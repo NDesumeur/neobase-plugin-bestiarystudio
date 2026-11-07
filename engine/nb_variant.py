@@ -113,6 +113,7 @@ def card(base, vid):
     keys = ("coups", "critique", "drain", "effets", "precision", "priorite", "purge", "recul", "soin", "statut")
     for a in out["attaques"]:
         a["element"] = vid
+        a.pop("cree", None), a.pop("show", None)  # la planche d'une attaque créée garde ses couleurs : pas pour un autre élément
         old, tech = nb_moves.CATALOG.get(tuple(a.get("id", ":").split(":"))), nb_moves.get(vid, a["genre"])
         if old and tech:  # la technique du même geste dans le nouvel élément (statut, effets…)
             if a["nom"] == old["nom"]:
